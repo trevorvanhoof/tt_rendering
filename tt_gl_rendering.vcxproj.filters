@@ -1,0 +1,157 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="Header Files\gl">
+      <UniqueIdentifier>{efbb9ee7-3f66-47ab-a838-d1d79fb5783e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\gl">
+      <UniqueIdentifier>{4b2ce6b4-1ab7-4d39-a43e-8f589ecf1b39}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\ThirdParty">
+      <UniqueIdentifier>{4d58ad39-0eba-4a61-9cea-a23e201ff989}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\ThirdParty\stb">
+      <UniqueIdentifier>{2a40558e-7691-4e2d-a277-9c5ab32afd76}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\ThirdParty">
+      <UniqueIdentifier>{73e8e836-a7df-4871-8ec6-a68573de2cdb}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\ThirdParty\stb">
+      <UniqueIdentifier>{e5d6ca72-8a63-4fc8-9bb0-1876750f32a1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\ThirdParty\KHR">
+      <UniqueIdentifier>{3cb5dcdb-f940-49ef-b2d8-4c36e8c30e92}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\ThirdParty\fontstash">
+      <UniqueIdentifier>{5f4fd2b3-36a7-444b-8379-cdc8f06607a1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\ThirdParty\fontstash">
+      <UniqueIdentifier>{e90b9b31-6f61-4cbb-bb39-c83d3494339b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resource Files\ThirdParty">
+      <UniqueIdentifier>{e793d0e9-1c07-4fc0-b4e0-83990a8f608b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resource Files\ThirdParty\fontstash">
+      <UniqueIdentifier>{eaf012f0-1811-448e-9af2-6432cdcb2ce2}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="test_app.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="gl\tt_gl.cpp">
+      <Filter>Source Files\gl</Filter>
+    </ClCompile>
+    <ClCompile Include="gl\tt_gl_handles.cpp">
+      <Filter>Source Files\gl</Filter>
+    </ClCompile>
+    <ClCompile Include="ThirdParty\stb\stb_image.cpp">
+      <Filter>Source Files\ThirdParty\stb</Filter>
+    </ClCompile>
+    <ClCompile Include="ThirdParty\fontstash\fontstash.cpp">
+      <Filter>Source Files\ThirdParty\fontstash</Filter>
+    </ClCompile>
+    <ClCompile Include="gl\tt_program_manager.cpp">
+      <Filter>Source Files\gl</Filter>
+    </ClCompile>
+    <ClCompile Include="gl\tt_render_concepts.cpp">
+      <Filter>Source Files\gl</Filter>
+    </ClCompile>
+    <ClCompile Include="gl\tt_glcontext.cpp">
+      <Filter>Source Files\gl</Filter>
+    </ClCompile>
+    <ClCompile Include="tt_rendering.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="gl\tt_gl_handles.h">
+      <Filter>Header Files\gl</Filter>
+    </ClInclude>
+    <ClInclude Include="gl\tt_program_manager.h">
+      <Filter>Header Files\gl</Filter>
+    </ClInclude>
+    <ClInclude Include="gl\tt_render_concepts.h">
+      <Filter>Header Files\gl</Filter>
+    </ClInclude>
+    <ClInclude Include="gl\tt_gl.h">
+      <Filter>Header Files\gl</Filter>
+    </ClInclude>
+    <ClInclude Include="ThirdParty\stb\stb_image.h">
+      <Filter>Header Files\ThirdParty\stb</Filter>
+    </ClInclude>
+    <ClInclude Include="ThirdParty\KHR\khrplatform.h">
+      <Filter>Header Files\ThirdParty\KHR</Filter>
+    </ClInclude>
+    <ClInclude Include="ThirdParty\KHR\glext.h">
+      <Filter>Header Files\ThirdParty\KHR</Filter>
+    </ClInclude>
+    <ClInclude Include="ThirdParty\fontstash\gl3corefontstash.h">
+      <Filter>Header Files\ThirdParty\fontstash</Filter>
+    </ClInclude>
+    <ClInclude Include="ThirdParty\fontstash\gl46corefontstash.h">
+      <Filter>Header Files\ThirdParty\fontstash</Filter>
+    </ClInclude>
+    <ClInclude Include="ThirdParty\fontstash\glfontstash.h">
+      <Filter>Header Files\ThirdParty\fontstash</Filter>
+    </ClInclude>
+    <ClInclude Include="ThirdParty\fontstash\stb_truetype.h">
+      <Filter>Header Files\ThirdParty\fontstash</Filter>
+    </ClInclude>
+    <ClInclude Include="ThirdParty\fontstash\fontstash.h">
+      <Filter>Header Files\ThirdParty\fontstash</Filter>
+    </ClInclude>
+    <ClInclude Include="gl\tt_glcontext.h">
+      <Filter>Header Files\gl</Filter>
+    </ClInclude>
+    <ClInclude Include="tt_rendering.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="gl\tt_gl_impl.inc">
+      <Filter>Header Files\gl</Filter>
+    </None>
+    <None Include="gl\tt_gl_impl_dbg.inc">
+      <Filter>Header Files\gl</Filter>
+    </None>
+    <None Include="gl\tt_gl_defs.inc">
+      <Filter>Header Files\gl</Filter>
+    </None>
+    <None Include="gl\tt_gl_defs_dbg.inc">
+      <Filter>Header Files\gl</Filter>
+    </None>
+    <None Include="ThirdParty\fontstash\README.md">
+      <Filter>Resource Files\ThirdParty\fontstash</Filter>
+    </None>
+    <None Include="default.vert.glsl">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="fontstash.frag.glsl">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="fontstash.vert.glsl">
+      <Filter>Resource Files</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="ThirdParty\fontstash\LICENSE.txt">
+      <Filter>Resource Files\ThirdParty\fontstash</Filter>
+    </Text>
+    <Text Include="ThirdParty\fontstash\url.txt">
+      <Filter>Resource Files\ThirdParty\fontstash</Filter>
+    </Text>
+  </ItemGroup>
+</Project>
