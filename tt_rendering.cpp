@@ -1,6 +1,7 @@
 #include "tt_rendering.h"
 
 #include <tt_messages.h>
+#include <ThirdParty/stb/stb_image.h>
 
 namespace TTRendering {
 	HandleBase::HandleBase(size_t identifier) : _identifier(identifier) {}
@@ -31,9 +32,10 @@ namespace TTRendering {
 	const BufferHandle* MeshHandle::indexBuffer() const { return _indexBuffer.value(); }
 	PrimitiveType MeshHandle::primitiveType() const { return _primitiveType; }
 	IndexType MeshHandle::indexType() const { return _indexType; }
-	
-	ImageHandle::ImageHandle(size_t identifier, unsigned int width, unsigned int height, ImageFormat format) :
-		HandleBase(identifier), _width(width), _height(height), _format(format) {}
+
+	ImageHandle::ImageHandle(size_t identifier, unsigned int width, unsigned int height, ImageFormat format, ImageInterpolation interpolation, ImageTiling tiling) :
+		HandleBase(identifier), _width(width), _height(height), _format(format), _interpolation(interpolation), _tiling(tiling) {}
+
 	unsigned int ImageHandle::width() const { return _width; }
 	unsigned int ImageHandle::height() const { return _height; }
 	void ImageHandle::resized(unsigned int width, unsigned int height) { _width = width; _height = height; }
@@ -212,25 +214,27 @@ namespace TTRendering {
 	bool UniformBlockHandle::setBVec4(const char* key, int* value, unsigned int count) { return _setUniform(key, value, UniformType::BVec4, count); }
 
     bool UniformBlockHandle::set(const char* key, const ImageHandle& image) { 
-        if (!_uniformInfo)
+        /*if (!_uniformInfo)
             return false;
         const UniformInfo::Field* info = _uniformInfo->find(key);
         if (!info) return false;
         if (info->type != UniformType::Image)
             return false;
         if(info->arraySize != 1)
-            return false;
+            return false;*/
         _images.insert(key, image);
         return true;
     }
 
-	MaterialHandle::MaterialHandle(const ShaderHandle& shader, const UniformInfo& uniformInfo, unsigned char*& uniformBuffer) :
-		UniformBlockHandle(uniformInfo, uniformBuffer), _shader(shader) {
+	MaterialHandle::MaterialHandle(const ShaderHandle& shader, const UniformInfo& uniformInfo, unsigned char*& uniformBuffer, MaterialBlendMode blendMode) :
+		UniformBlockHandle(uniformInfo, uniformBuffer), _shader(shader), _blendMode(blendMode) {
 	}
 
-	MaterialHandle::MaterialHandle(const ShaderHandle& shader) : UniformBlockHandle(), _shader(shader) {}
+	MaterialHandle::MaterialHandle(const ShaderHandle& shader, MaterialBlendMode blendMode) : UniformBlockHandle(), _shader(shader), _blendMode(blendMode) {}
 
 	const ShaderHandle& MaterialHandle::shader() const { return _shader; }
+	
+	MaterialBlendMode MaterialHandle::blendMode() const { return _blendMode; }
 
 	std::vector<RenderPass::DrawInfo>& RenderPass::DrawQueue::ShaderQueue::MaterialQueue::fetch(const MaterialHandle& key) {
 		// Ensure we have a queue with this material instance
@@ -288,9 +292,11 @@ namespace TTRendering {
 		modified = true;
 	}
 
-	void RenderPass::addToDrawQueue(const MeshHandle& mesh, const MaterialHandle& material, const PushConstants& pushConstants) {
-		drawQueue.fetch(mesh._attributeLayout).fetch(material._shader.identifier()).fetch(material).push_back(DrawInfo(mesh.identifier(), pushConstants));
+	PushConstants* RenderPass::addToDrawQueue(const MeshHandle& mesh, const MaterialHandle& material, const PushConstants& pushConstants) {
+		auto& queue = drawQueue.fetch(mesh._attributeLayout).fetch(material._shader.identifier()).fetch(material);
+		queue.push_back(DrawInfo(mesh.identifier(), pushConstants));
 		modified = true;
+		return &queue.back().pushConstants;
 	}
 
     void RenderPass::emptyQueue() {
@@ -352,16 +358,16 @@ namespace TTRendering {
 		return handle;
 	}
 
-	MaterialHandle RenderingContext::createMaterial(const ShaderHandle& shader) {
+	MaterialHandle RenderingContext::createMaterial(const ShaderHandle& shader, MaterialBlendMode blendMode) {
 		TT::assert(shaderUniformInfo.contains(shader.identifier()));
 		const std::unordered_map<int, UniformInfo>& info = shaderUniformInfo.find(shader.identifier())->second;
 		auto it = info.find((int)UniformBlockSemantics::Material);
 		size_t bufferSize = 0;
 		if (it != info.end()) {
 			materialUniformBuffers.push_back(new unsigned char[it->second.bufferSize]);
-			return MaterialHandle(shader, it->second, materialUniformBuffers.back());
+			return MaterialHandle(shader, it->second, materialUniformBuffers.back(), blendMode);
 		}
-		return MaterialHandle(shader);
+		return MaterialHandle(shader, blendMode);
 	}
 
 	UniformBlockHandle RenderingContext::createUniformBuffer(const ShaderHandle& shader, const UniformBlockSemantics& semantic) {
@@ -389,5 +395,21 @@ namespace TTRendering {
 			return *existing;
 		ShaderHandle shader = createShader(stages);
 		return registerShader(hash, shader, getUniformBlocks(shader, stages));
+	}
+
+	NullableHandle<ImageHandle> RenderingContext::loadImage(const char* filePath, ImageInterpolation interpolation, ImageTiling tiling) {
+		int width, height, channels;
+		unsigned char* data = stbi_load(filePath, &width, &height, &channels, 0);
+		ImageFormat format;
+		switch (channels) {
+		case 1: format = ImageFormat::R8; break;
+		case 2: format = ImageFormat::RG8; break;
+		case 3: format = ImageFormat::RGB8; break;
+		case 4: format = ImageFormat::RGBA8; break;
+		default: TT::error("Invalid image: %s", filePath); return {};
+		}
+		ImageHandle r = createImage(width, height, format, interpolation, tiling, data);
+		stbi_image_free(data);
+		return { r };
 	}
 }

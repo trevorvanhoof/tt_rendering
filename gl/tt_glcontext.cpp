@@ -140,11 +140,26 @@ namespace {
             channels = GL_RGBA;
             elementType = GL_FLOAT;
             return;
-        case ImageFormat::R8:
-            internalFormat = GL_R8;
-            channels = GL_RED;
-            elementType = GL_UNSIGNED_BYTE;
-            return;
+		case ImageFormat::R8:
+			internalFormat = GL_R8;
+			channels = GL_RED;
+			elementType = GL_UNSIGNED_BYTE;
+			return;
+		case ImageFormat::RG8:
+			internalFormat = GL_RG8;
+			channels = GL_RG;
+			elementType = GL_UNSIGNED_BYTE;
+			return;
+		case ImageFormat::RGB8:
+			internalFormat = GL_RGB8;
+			channels = GL_RGB;
+			elementType = GL_UNSIGNED_BYTE;
+			return;
+		case ImageFormat::RGBA8:
+			internalFormat = GL_RGBA8;
+			channels = GL_RGBA;
+			elementType = GL_UNSIGNED_BYTE;
+			return;
 		default:
 			// unhandled format
 			TT::assert(false);
@@ -161,6 +176,10 @@ namespace {
 			return GL_LINES;
 		case PrimitiveType::Triangle:
 			return GL_TRIANGLES;
+		case PrimitiveType::TriangleFan:
+			return GL_TRIANGLE_FAN;
+		case PrimitiveType::TriangleStrip:
+			return GL_TRIANGLE_STRIP;
 		}
 		TT::assert(false);
 		return GL_TRIANGLES;
@@ -283,7 +302,8 @@ namespace TTRendering {
 	}
 
 	void OpenGLContext::windowResized(unsigned int width, unsigned int height) {
-		glViewport(0, 0, width, height); TT_GL_DBG_ERR;
+		screenWidth = width;
+		screenHeight = height;
 	}
 
 	void OpenGLContext::beginFrame() {
@@ -304,7 +324,7 @@ namespace TTRendering {
         return BufferHandle(glHandle, size);
     }
 
-	MeshHandle OpenGLContext::createMesh(const std::vector<MeshAttribute>& attributeLayout, BufferHandle vbo, size_t numElements, BufferHandle* ibo) {
+	MeshHandle OpenGLContext::createMesh(const std::vector<MeshAttribute>& attributeLayout, BufferHandle vbo, size_t numElements, BufferHandle* ibo, PrimitiveType primitiveType) {
 		GLuint glHandle;
 		glGenVertexArrays(1, &glHandle);
 
@@ -351,7 +371,7 @@ namespace TTRendering {
 		glBindVertexArray(0);
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 
-		return registerMesh(MeshHandle(glHandle, hashMeshLayout(attributeLayout), vbo, numElements, PrimitiveType::Triangle, IndexType::U32, ibo));
+		return registerMesh(MeshHandle(glHandle, hashMeshLayout(attributeLayout), vbo, numElements, primitiveType, IndexType::U32, ibo));
 	}
 
 	ShaderStageHandle OpenGLContext::createShaderStage(const char* glslFilePath) {
@@ -396,19 +416,21 @@ namespace TTRendering {
 		return ShaderHandle(glHandle);
 	}
 
-	ImageHandle OpenGLContext::createImage(unsigned int width, unsigned int height, ImageFormat format) {
+	ImageHandle OpenGLContext::createImage(unsigned int width, unsigned int height, ImageFormat format, ImageInterpolation interpolation, ImageTiling tiling, const unsigned char* data) {
 		GLuint glHandle;
 		glGenTextures(1, &glHandle); TT_GL_DBG_ERR;
 		glBindTexture(GL_TEXTURE_2D, glHandle); TT_GL_DBG_ERR;
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); TT_GL_DBG_ERR;
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE); TT_GL_DBG_ERR;
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); TT_GL_DBG_ERR;
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR); TT_GL_DBG_ERR;
+		GLenum repeatMode = (tiling == ImageTiling::Clamp) ? GL_CLAMP_TO_EDGE : GL_REPEAT;
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, repeatMode); TT_GL_DBG_ERR;
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, repeatMode); TT_GL_DBG_ERR;
+		GLenum interpMode = (interpolation == ImageInterpolation::Linear) ? GL_LINEAR : GL_NEAREST;
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, interpMode); TT_GL_DBG_ERR;
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, interpMode); TT_GL_DBG_ERR;
 		GLenum internalFormat, channels, elementType;
 		glFormatInfo(format, internalFormat, channels, elementType); TT_GL_DBG_ERR;
-		glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, width, height, 0, channels, elementType, nullptr); TT_GL_DBG_ERR;
+		glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, width, height, 0, channels, elementType, data); TT_GL_DBG_ERR;
 		glBindTexture(GL_TEXTURE_2D, 0); TT_GL_DBG_ERR;
-		return ImageHandle(glHandle, width, height, format);
+		return ImageHandle(glHandle, width, height, format, interpolation, tiling);
 	}
     
     void OpenGLContext::resizeImage(ImageHandle& image, unsigned int width, unsigned int height) {
@@ -477,8 +499,10 @@ namespace TTRendering {
 	void OpenGLContext::drawPass(RenderPass& pass) {
 		if (pass.framebuffer.isEmpty()) {
 			glBindFramebuffer(GL_FRAMEBUFFER, 0);
+			glViewport(0, 0, screenWidth, screenHeight); TT_GL_DBG_ERR;
 		} else {
 			glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)pass.framebuffer.value()->identifier());
+			glViewport(0, 0, pass.framebuffer.value()->width(), pass.framebuffer.value()->height()); TT_GL_DBG_ERR;
 		}
 
 		GLenum clearFlags = 0;
@@ -502,11 +526,6 @@ namespace TTRendering {
 			glBindBufferRange(GL_UNIFORM_BUFFER, (GLuint)UniformBlockSemantics::Pass, passUbo, 0, requiredBufferSize);
 		}
 
-		// TODO: How do we know the layout for this?
-		//       Should we generate the UniformInfo from source and
-		//       then use a Material-esque system to assign named values instead?
-		// pass.passUniforms;
-		// std::unordered_map<const MeshLayout&, std::unordered_map<const Program&, std::unordered_map<const Material&, std::vector<const Mesh&>>>> drawQueue;
 		for (size_t meshLayoutIndex = 0; meshLayoutIndex < pass.drawQueue.keys.size(); ++meshLayoutIndex) {
 			size_t meshLayoutHash = pass.drawQueue.keys[meshLayoutIndex];
 			const auto& shaderQueue = pass.drawQueue.queues[meshLayoutIndex];
@@ -536,6 +555,30 @@ namespace TTRendering {
 				const auto& materialQueue = shaderQueue.queues[shaderIndex];
 				for (size_t materialIndex = 0; materialIndex < materialQueue.keys.size(); ++materialIndex) {
 					const MaterialHandle& material = materialQueue.keys[shaderIndex];
+
+					// TODO: It is probably important to queue by blend-mode.
+					auto blendMode = material.blendMode();
+					switch (blendMode) {
+					case TTRendering::MaterialBlendMode::Opaque:
+					case TTRendering::MaterialBlendMode::AlphaTest:
+						glDisable(GL_BLEND);
+						// glBlendFunc(GL_ONE, GL_ZERO);
+						break;
+					case TTRendering::MaterialBlendMode::Alpha:
+						glEnable(GL_BLEND);
+						glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+						break;
+					case TTRendering::MaterialBlendMode::PremultipliedAlpha:
+						glEnable(GL_BLEND);
+						glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+						break;
+					case TTRendering::MaterialBlendMode::Additive:
+						glEnable(GL_BLEND);
+						glBlendFunc(GL_ONE, GL_ONE);
+						break;
+					default:
+						TT::assertFatal(false);
+					}
 
 					if (uniformInfo) {
 						TT::assert(material._uniformBuffer != nullptr);

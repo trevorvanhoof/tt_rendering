@@ -145,6 +145,12 @@
     <None Include="fontstash.vert.glsl">
       <Filter>Resource Files</Filter>
     </None>
+    <None Include="image.frag.glsl">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="image.vert.glsl">
+      <Filter>Resource Files</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <Text Include="ThirdParty\fontstash\LICENSE.txt">

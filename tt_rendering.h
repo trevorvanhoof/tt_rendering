@@ -9,7 +9,7 @@
 
 #define BEFRIEND_CONTEXTS friend class RenderingContext; friend class OpenGLContext; friend class VkContext;
 
-namespace {
+namespace TTRendering {
 	// TODO: Use tt_containers instead of this workaround?
 	// The reason these exist is because internally they generate std::pair
 	// which in turn fails to copy or default construct or whatever.
@@ -57,9 +57,9 @@ namespace {
 			return &handles[it->second];
 		}
 
-        auto begin() const { return keyToIndex.begin(); }
-        auto end() const { return keyToIndex.end(); }
-        const T& handle(size_t index) const { return handles[index]; }
+		auto begin() const { return keyToIndex.begin(); }
+		auto end() const { return keyToIndex.end(); }
+		const T& handle(size_t index) const { return handles[index]; }
 	};
 
 	template<typename T>
@@ -70,6 +70,11 @@ namespace {
 	public:
 		NullableHandle() {
 			_handle = new unsigned char[sizeof(T)];
+		}
+
+		NullableHandle(const T& handle) {
+			_handle = new unsigned char[sizeof(T)];
+			set(handle);
 		}
 
 		~NullableHandle() {
@@ -86,6 +91,7 @@ namespace {
 				set(*rhs.value());
 			else
 				clear();
+			return *this;
 		}
 
 		NullableHandle(NullableHandle&& rhs) = delete;
@@ -108,6 +114,10 @@ namespace {
 
 		const T* value() const {
 			return _empty ? nullptr : (const T*)_handle;
+		}
+
+		T* value() {
+			return _empty ? nullptr : (T*)_handle;
 		}
 	};
 }
@@ -174,7 +184,7 @@ namespace TTRendering {
 	};
 
 	enum class PrimitiveType {
-		Point, Line, Triangle
+		Point, Line, Triangle, TriangleStrip, TriangleFan
 	};
 
 	enum class IndexType {
@@ -210,9 +220,19 @@ namespace TTRendering {
 	};
 
 	enum class ImageFormat {
-        R8,
 		Depth32F,
 		RGBA32F,
+		R8, RG8, RGB8, RGBA8,
+	};
+
+	enum class ImageInterpolation {
+		Linear,
+		Nearest,
+	};
+
+	enum class ImageTiling {
+		Repeat,
+		Clamp,
 	};
 
 	class ImageHandle final : public HandleBase {
@@ -221,15 +241,20 @@ namespace TTRendering {
 		unsigned int _width;
 		unsigned int _height;
 		ImageFormat _format;
+		ImageInterpolation _interpolation;
+		ImageTiling _tiling;
 
-		ImageHandle(size_t identifier, unsigned int width, unsigned int height, ImageFormat format);
-        void resized(unsigned int width, unsigned int height);
+		ImageHandle(size_t identifier, unsigned int width, unsigned int height, ImageFormat format, ImageInterpolation interpolation, ImageTiling tiling);
+
+		void resized(unsigned int width, unsigned int height);
 
 	public:
 		unsigned int width() const;
 		unsigned int height() const;
 		ImageFormat format() const;
-		// TODO: Tiling mode, generate mip maps, interpolation mode, resize -> need to know the limitations of vulkan before adding these
+		ImageInterpolation interpolation() const;
+		ImageTiling tiling() const;
+		// TODO: generate mip maps, resize -> need to know the limitations of vulkan before adding these
 	};
 
 	class FramebufferHandle final : public HandleBase {
@@ -281,7 +306,7 @@ namespace TTRendering {
 			std::string name;
 			UniformType type;
 			size_t offset;
-            unsigned int arraySize; // non-arrays are just 1
+			unsigned int arraySize; // non-arrays are just 1
 
 			bool operator==(const Field& rhs);
 		};
@@ -301,14 +326,15 @@ namespace TTRendering {
 
 		const UniformInfo* _uniformInfo;
 		unsigned char* _uniformBuffer;
-        HandleDict<std::string, ImageHandle> _images;
+		HandleDict<std::string, ImageHandle> _images;
 
 	protected:
 		bool _setUniform(const char* key, void* src, UniformType srcType, unsigned int count = 1);
 		UniformBlockHandle(const UniformInfo& uniformInfo, unsigned char*& uniformBuffer);
-		UniformBlockHandle();
 
 	public:
+		UniformBlockHandle();
+
 		size_t size() const;
 		unsigned char* cpuBuffer() const;
 
@@ -364,7 +390,15 @@ namespace TTRendering {
 		bool setBVec3(const char* key, int* value, unsigned int count = 1);
 		bool setBVec4(const char* key, int* value, unsigned int count = 1);
 
-        bool set(const char* key, const ImageHandle& image);
+		bool set(const char* key, const ImageHandle& image);
+	};
+
+	enum class MaterialBlendMode {
+		Opaque,
+		AlphaTest,
+		Alpha,
+		PremultipliedAlpha,
+		Additive,
 	};
 
 	class MaterialHandle : public UniformBlockHandle {
@@ -373,12 +407,14 @@ namespace TTRendering {
 		friend class RenderPass;
 
 		ShaderHandle _shader;
+		MaterialBlendMode _blendMode;
 
-		MaterialHandle(const ShaderHandle& shader, const UniformInfo& uniformInfo, unsigned char*& uniformBuffer);
-		MaterialHandle(const ShaderHandle& shader);
+		MaterialHandle(const ShaderHandle& shader, const UniformInfo& uniformInfo, unsigned char*& uniformBuffer, MaterialBlendMode blendMode = MaterialBlendMode::Opaque);
+		MaterialHandle(const ShaderHandle& shader, MaterialBlendMode blendMode = MaterialBlendMode::Opaque);
 
 	public:
 		const ShaderHandle& shader() const;
+		MaterialBlendMode blendMode() const;
 	};
 
 	struct PushConstants {
@@ -386,7 +422,7 @@ namespace TTRendering {
 		TT::Mat44 modelMatrix = TT::IDENTITY;
 		TT::Mat44 extraData = TT::IDENTITY;
 	};
-	
+
 	class RenderPass {
 		BEFRIEND_CONTEXTS;
 
@@ -439,8 +475,8 @@ namespace TTRendering {
 		TT::Vec4 clearColor;
 		float clearDepthValue = 1.0f;
 
-		void addToDrawQueue(const MeshHandle& mesh, const MaterialHandle& material, const PushConstants& pushConstants);
-        void emptyQueue();
+		PushConstants* addToDrawQueue(const MeshHandle& mesh, const MaterialHandle& material, const PushConstants& pushConstants);
+		void emptyQueue();
 	};
 
 	enum class UniformBlockSemantics {
@@ -449,10 +485,10 @@ namespace TTRendering {
 		Material = 2,
 	};
 
-    enum class BufferMode {
-        StaticDraw = 0,
-        DynamicDraw = 1,
-    };
+	enum class BufferMode {
+		StaticDraw = 0,
+		DynamicDraw = 1,
+	};
 
 	// TODO: There is no way to free VRAM at present
 	// It may be neat to cache all allocated resources in the context for deletion when the context gets destroyed
@@ -476,8 +512,8 @@ namespace TTRendering {
 		// CPU, 1 per created material
 		std::vector<unsigned char*> materialUniformBuffers;
 
-        static size_t hashMeshLayout(const std::vector<MeshAttribute>& attributes);
-        static size_t hashHandles(const HandleBase* handles, size_t count);
+		static size_t hashMeshLayout(const std::vector<MeshAttribute>& attributes);
+		static size_t hashHandles(const HandleBase* handles, size_t count);
 
 	public:
 		virtual void windowResized(unsigned int width, unsigned int height) = 0;
@@ -486,13 +522,14 @@ namespace TTRendering {
 		virtual void drawPass(RenderPass& pass) = 0;
 
 		virtual BufferHandle createBuffer(size_t size, unsigned char* data = nullptr, BufferMode mode = BufferMode::StaticDraw) = 0;
-		virtual MeshHandle createMesh(const std::vector<MeshAttribute>& attributeLayout, BufferHandle vbo, size_t numElements, BufferHandle* ibo = nullptr) = 0;
+		virtual MeshHandle createMesh(const std::vector<MeshAttribute>& attributeLayout, BufferHandle vbo, size_t numElements, BufferHandle* ibo = nullptr, PrimitiveType primitiveType = PrimitiveType::Triangle) = 0;
 		virtual ShaderStageHandle fetchShaderStage(const char* glslFilePath);
 		virtual ShaderHandle fetchShader(const std::vector<ShaderStageHandle>& stages);
 		virtual UniformBlockHandle createUniformBuffer(const ShaderHandle& shader, const UniformBlockSemantics& semantic);
-		virtual MaterialHandle createMaterial(const ShaderHandle& shader);
-		virtual ImageHandle createImage(unsigned int width, unsigned int height, ImageFormat format) = 0;
-        virtual void resizeImage(ImageHandle& image, unsigned int width, unsigned int height) = 0;
+		virtual MaterialHandle createMaterial(const ShaderHandle& shader, MaterialBlendMode blendMode = MaterialBlendMode::Opaque);
+		virtual ImageHandle createImage(unsigned int width, unsigned int height, ImageFormat format, ImageInterpolation interpolation = ImageInterpolation::Linear, ImageTiling tiling = ImageTiling::Repeat, const unsigned char* data = nullptr) = 0;
+		NullableHandle<ImageHandle> loadImage(const char* filePath, ImageInterpolation interpolation = ImageInterpolation::Linear, ImageTiling tiling = ImageTiling::Repeat);
+		virtual void resizeImage(ImageHandle& image, unsigned int width, unsigned int height) = 0;
 		virtual FramebufferHandle createFramebuffer(const std::vector<ImageHandle>& colorAttachments, ImageHandle* depthStencilAttachment = nullptr) = 0;
 	};
 }

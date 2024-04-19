@@ -182,6 +182,8 @@
     <None Include="gl\tt_gl_defs_dbg.inc" />
     <None Include="gl\tt_gl_impl.inc" />
     <None Include="gl\tt_gl_impl_dbg.inc" />
+    <None Include="image.frag.glsl" />
+    <None Include="image.vert.glsl" />
     <None Include="ThirdParty\fontstash\README.md" />
   </ItemGroup>
   <ItemGroup>
