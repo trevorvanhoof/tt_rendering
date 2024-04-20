@@ -119,6 +119,9 @@
     <ClInclude Include="tt_rendering.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="gl\tt_gl_rendering_fontstash.h">
+      <Filter>Header Files\gl</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="gl\tt_gl_impl.inc">
@@ -149,6 +152,24 @@
       <Filter>Resource Files</Filter>
     </None>
     <None Include="image.vert.glsl">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="particles.compute.glsl">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="image_instanced.frag.glsl">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="image_instanced.vert.glsl">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="particles_tick.compute.glsl">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="noop.vert.glsl">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="blit.frag.glsl">
       <Filter>Resource Files</Filter>
     </None>
   </ItemGroup>

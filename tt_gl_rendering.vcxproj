@@ -158,6 +158,7 @@
     <ClInclude Include="gl\tt_gl_handles.h">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
     </ClInclude>
+    <ClInclude Include="gl\tt_gl_rendering_fontstash.h" />
     <ClInclude Include="gl\tt_program_manager.h">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
     </ClInclude>
@@ -175,6 +176,7 @@
     <ClInclude Include="tt_rendering.h" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="blit.frag.glsl" />
     <None Include="default.vert.glsl" />
     <None Include="fontstash.frag.glsl" />
     <None Include="fontstash.vert.glsl" />
@@ -184,6 +186,11 @@
     <None Include="gl\tt_gl_impl_dbg.inc" />
     <None Include="image.frag.glsl" />
     <None Include="image.vert.glsl" />
+    <None Include="image_instanced.frag.glsl" />
+    <None Include="image_instanced.vert.glsl" />
+    <None Include="noop.vert.glsl" />
+    <None Include="particles.compute.glsl" />
+    <None Include="particles_tick.compute.glsl" />
     <None Include="ThirdParty\fontstash\README.md" />
   </ItemGroup>
   <ItemGroup>

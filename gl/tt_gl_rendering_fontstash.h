@@ -25,7 +25,7 @@ namespace {
             image(context->createImage(64, 64, TTRendering::ImageFormat::R8)) ,
             material(context->createMaterial(context->fetchShader({context->fetchShaderStage("fontStash.vert.glsl"), context->fetchShaderStage("fontStash.frag.glsl")}))),
             vbo(context->createBuffer(FONS_VERTEX_COUNT * sizeof(float) * 6, nullptr, TTRendering::BufferMode::StaticDraw)),
-            vao(context->createMesh({{TTRendering::MeshAttribute::Dimensions::D2, TTRendering::MeshAttribute::ElementType::F32, 0}, {TTRendering::MeshAttribute::Dimensions::D2, TTRendering::MeshAttribute::ElementType::F32, 1}, {TTRendering::MeshAttribute::Dimensions::D2, TTRendering::MeshAttribute::ElementType::F32, 2}}, vbo, FONS_VERTEX_COUNT, nullptr))
+            vao(context->createMesh(FONS_VERTEX_COUNT, vbo, {{TTRendering::MeshAttribute::Dimensions::D2, TTRendering::MeshAttribute::ElementType::F32, 0}, {TTRendering::MeshAttribute::Dimensions::D2, TTRendering::MeshAttribute::ElementType::F32, 1}, {TTRendering::MeshAttribute::Dimensions::D2, TTRendering::MeshAttribute::ElementType::F32, 2}}, nullptr))
         {
         }
 	};

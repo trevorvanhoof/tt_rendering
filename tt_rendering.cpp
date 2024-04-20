@@ -11,56 +11,38 @@ namespace TTRendering {
 	size_t BufferHandle::size() const { return _size; }
 	
 	MeshHandle::MeshHandle(size_t identifier,
-		size_t attributeLayout,
+		size_t meshLayoutHash,
 		BufferHandle vertexBuffer,
 		size_t numElements,
 		PrimitiveType primitiveType,
 		IndexType indexType,
-		BufferHandle* indexBuffer) :
+		BufferHandle* indexBuffer,
+        size_t numIstances,
+        BufferHandle* instanceBuffer) :
 		HandleBase(identifier),
-		_attributeLayout(attributeLayout),
+        _meshLayoutHash(meshLayoutHash),
 		_vertexBuffer(vertexBuffer),
 		_numElements(numElements),
 		_primitiveType(primitiveType),
-		_indexType(indexType)
-	{
-		if (indexBuffer)
-			_indexBuffer.set(*indexBuffer);
-	}
+		_indexType(indexType),
+        _indexBuffer(indexBuffer),
+        _numIstances(numIstances),
+        _instanceBuffer(instanceBuffer) {}
 	const BufferHandle MeshHandle::vertexBuffer() const { return _vertexBuffer; }
 	size_t MeshHandle::numElements() const { return _numElements; }
 	const BufferHandle* MeshHandle::indexBuffer() const { return _indexBuffer.value(); }
 	PrimitiveType MeshHandle::primitiveType() const { return _primitiveType; }
 	IndexType MeshHandle::indexType() const { return _indexType; }
 
-	ImageHandle::ImageHandle(size_t identifier, unsigned int width, unsigned int height, ImageFormat format, ImageInterpolation interpolation, ImageTiling tiling) :
-		HandleBase(identifier), _width(width), _height(height), _format(format), _interpolation(interpolation), _tiling(tiling) {}
+	ImageHandle::ImageHandle(size_t identifier, ImageFormat format, ImageInterpolation interpolation, ImageTiling tiling) :
+		HandleBase(identifier), _format(format), _interpolation(interpolation), _tiling(tiling) {}
 
-	unsigned int ImageHandle::width() const { return _width; }
-	unsigned int ImageHandle::height() const { return _height; }
-	void ImageHandle::resized(unsigned int width, unsigned int height) { _width = width; _height = height; }
 	ImageFormat ImageHandle::format() const { return _format; }
 	
 	FramebufferHandle::FramebufferHandle(size_t identifier, const std::vector<ImageHandle>& colorAttachments, ImageHandle* depthStencilAttachment) :
 		HandleBase(identifier), _colorAttachments(colorAttachments) {
 		if (depthStencilAttachment)
 			_depthStencilAttachment.set(*depthStencilAttachment);
-	}
-
-	unsigned int FramebufferHandle::width() const {
-		if (!_depthStencilAttachment.isEmpty())
-			return _depthStencilAttachment.value()->width();
-		if(_colorAttachments.size())
-			return _colorAttachments[0].width();
-		return 0;
-	}
-
-	unsigned int FramebufferHandle::height() const {
-		if(!_depthStencilAttachment.isEmpty())
-			return _depthStencilAttachment.value()->height();
-		if (_colorAttachments.size())
-			return _colorAttachments[0].height();
-		return 0;
 	}
 
 	ShaderStageHandle::ShaderStageHandle(size_t identifier, ShaderStage stage) : 
@@ -103,7 +85,7 @@ namespace TTRendering {
 			case UniformType::Int:
 			case UniformType::UInt:
 			case UniformType::Bool:
-			case UniformType::Image:
+                // case UniformType::Image:
 				return 4;
 			case UniformType::Vec2:
 			case UniformType::IVec2:
@@ -126,7 +108,7 @@ namespace TTRendering {
 			case UniformType::Mat4:
 				return 4 * 16;
 			}
-			// TT::assert(false);
+			TT::assert(false);
 			return 0;
 		}
 	}
@@ -214,15 +196,12 @@ namespace TTRendering {
 	bool UniformBlockHandle::setBVec4(const char* key, int* value, unsigned int count) { return _setUniform(key, value, UniformType::BVec4, count); }
 
     bool UniformBlockHandle::set(const char* key, const ImageHandle& image) { 
-        /*if (!_uniformInfo)
-            return false;
-        const UniformInfo::Field* info = _uniformInfo->find(key);
-        if (!info) return false;
-        if (info->type != UniformType::Image)
-            return false;
-        if(info->arraySize != 1)
-            return false;*/
         _images.insert(key, image);
+        return true;
+    }
+
+    bool UniformBlockHandle::set(size_t binding, const BufferHandle& buffer) {
+        _ssbos.insert(binding, buffer);
         return true;
     }
 
@@ -292,12 +271,12 @@ namespace TTRendering {
 		modified = true;
 	}
 
-	PushConstants* RenderPass::addToDrawQueue(const MeshHandle& mesh, const MaterialHandle& material, const PushConstants& pushConstants) {
-		auto& queue = drawQueue.fetch(mesh._attributeLayout).fetch(material._shader.identifier()).fetch(material);
-		queue.push_back(DrawInfo(mesh.identifier(), pushConstants));
-		modified = true;
-		return &queue.back().pushConstants;
-	}
+    PushConstants* RenderPass::addToDrawQueue(const MeshHandle& mesh, const MaterialHandle& material, const PushConstants& pushConstants, size_t instanceCount) {
+        auto& queue = drawQueue.fetch(mesh._meshLayoutHash).fetch(material._shader.identifier()).fetch(material);
+        queue.push_back(DrawInfo(mesh.identifier(), pushConstants, instanceCount));
+        modified = true;
+        return &queue.back().pushConstants;
+    }
 
     void RenderPass::emptyQueue() {
         drawQueue.meshLayoutHashToQueueIndex.clear();

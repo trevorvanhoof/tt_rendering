@@ -292,6 +292,7 @@ namespace TTRendering {
 	OpenGLContext::OpenGLContext(const TT::Window& window) {
 		_windowsGLContext = TTRendering::createGLContext(window);
         TTRendering::loadGLFunctions();
+        glEnable(GL_DEPTH_TEST);
 		glGenBuffers(1, &passUbo);
 		glGenBuffers(1, &materialUbo);
 		glGenBuffers(1, &pushConstantsUbo);
@@ -324,54 +325,66 @@ namespace TTRendering {
         return BufferHandle(glHandle, size);
     }
 
-	MeshHandle OpenGLContext::createMesh(const std::vector<MeshAttribute>& attributeLayout, BufferHandle vbo, size_t numElements, BufferHandle* ibo, PrimitiveType primitiveType) {
+
+    MeshHandle OpenGLContext::createMesh(
+        size_t numElements, // num vertices if indexData == nullptr, else num indices
+        BufferHandle vertexData, 
+        const std::vector<MeshAttribute>& attributeLayout,
+        BufferHandle* indexData,
+        PrimitiveType primitiveType,
+        size_t numInstances, // mesh is not instanced if numInstances == 0
+        BufferHandle* instanceData, // ignored if numInstances == 0
+        const std::vector<MeshAttribute>& instanceAttributeLayout) { // ignored if numInstances == 0 or instanceData == nullptr
 		GLuint glHandle;
 		glGenVertexArrays(1, &glHandle);
 
 		glBindVertexArray(glHandle);
 
 		// indices
-		if (ibo) {
-			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, (GLuint)ibo->identifier());
+		if (indexData) {
+			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, (GLuint)indexData->identifier());
 		}
 
 		// vertices
-		glBindBuffer(GL_ARRAY_BUFFER, (GLuint)vbo.identifier());
+        {
+		    glBindBuffer(GL_ARRAY_BUFFER, (GLuint)vertexData.identifier());
 
-		GLuint stride = 0;
-		for (auto attribute : attributeLayout) stride += attribute.sizeInBytes();
+		    GLuint stride = 0;
+		    for (const auto& attribute : attributeLayout) stride += attribute.sizeInBytes();
 
-		size_t offset = 0;
-		for (auto attribute : attributeLayout) {
-			glEnableVertexAttribArray(attribute.location);
-			vertexAttribPointer(attribute.location, ((int)attribute.dimensions + 1), glElementType(attribute.elementType), false, stride, (const void*)offset);
-			offset += attribute.sizeInBytes();
-		}
-		glBindBuffer(GL_ARRAY_BUFFER, 0);
+		    size_t offset = 0;
+		    for (const auto& attribute : attributeLayout) {
+			    glEnableVertexAttribArray(attribute.location);
+			    vertexAttribPointer(attribute.location, ((int)attribute.dimensions + 1), glElementType(attribute.elementType), false, stride, (const void*)offset);
+			    offset += attribute.sizeInBytes();
+		    }
 
-		/*
+		    glBindBuffer(GL_ARRAY_BUFFER, 0);
+        }
+
 		// instancing
-		for (auto instanceBuffer : instanceAttribs) {
-			glBindBuffer(GL_ARRAY_BUFFER, instanceBuffer->handle);
-			GLsizei stride = 0;
-			for (auto attrib : instanceBuffer->bindings)
-				stride += attrib.elementSizeInBytes() * ((GLsizei)attrib.dimensions + 1);
+        if(numInstances && instanceData) {
+            glBindBuffer(GL_ARRAY_BUFFER, (GLuint)instanceData->identifier());
 
-			offset = 0;
-			for (auto attrib : instanceBuffer->bindings) {
-				glEnableVertexAttribArray((int)attrib.semantic);
-				vertexAttribPointer((int)attrib.semantic, ((int)attrib.dimensions + 1), attrib.glElementType(), false, stride, (const void*)offset);
-				glVertexAttribDivisor((int)attrib.semantic, 1);
-				offset += attrib.elementSizeInBytes() * ((GLsizei)attrib.dimensions + 1);
-			}
-			glBindBuffer(GL_ARRAY_BUFFER, 0);
-		}
-		*/
+            GLuint stride = 0;
+            for (const auto& attribute : instanceAttributeLayout) stride += attribute.sizeInBytes();
+
+            size_t offset = 0;
+		    for (const MeshAttribute& attribute : instanceAttributeLayout) {
+				glEnableVertexAttribArray(attribute.location);
+				vertexAttribPointer(attribute.location, ((int)attribute.dimensions + 1), glElementType(attribute.elementType), false, stride, (const void*)offset);
+				glVertexAttribDivisor(attribute.location, 1);
+				offset += attribute.sizeInBytes();
+		    }
+
+            glBindBuffer(GL_ARRAY_BUFFER, 0);
+        }
 
 		glBindVertexArray(0);
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 
-		return registerMesh(MeshHandle(glHandle, hashMeshLayout(attributeLayout), vbo, numElements, primitiveType, IndexType::U32, ibo));
+        size_t attributeLayoutHash = TT::hashCombine(hashMeshLayout(attributeLayout), hashMeshLayout(instanceAttributeLayout));
+		return registerMesh(MeshHandle(glHandle, attributeLayoutHash, vertexData, numElements, primitiveType, IndexType::U32, indexData, numInstances, instanceData));
 	}
 
 	ShaderStageHandle OpenGLContext::createShaderStage(const char* glslFilePath) {
@@ -430,17 +443,30 @@ namespace TTRendering {
 		glFormatInfo(format, internalFormat, channels, elementType); TT_GL_DBG_ERR;
 		glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, width, height, 0, channels, elementType, data); TT_GL_DBG_ERR;
 		glBindTexture(GL_TEXTURE_2D, 0); TT_GL_DBG_ERR;
-		return ImageHandle(glHandle, width, height, format, interpolation, tiling);
+		return ImageHandle(glHandle, /*width, height,*/ format, interpolation, tiling);
 	}
-    
-    void OpenGLContext::resizeImage(ImageHandle& image, unsigned int width, unsigned int height) {
+
+    void OpenGLContext::imageSize(const ImageHandle& image, unsigned int& width, unsigned int& height) const {
+        glBindTexture(GL_TEXTURE_2D, (GLuint)image.identifier()); TT_GL_DBG_ERR;
+        glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, (int*)&width); TT_GL_DBG_ERR;
+        glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, (int*)&height); TT_GL_DBG_ERR;
+        glBindTexture(GL_TEXTURE_2D, 0); TT_GL_DBG_ERR;
+    }
+
+    void OpenGLContext::resizeImage(const ImageHandle& image, unsigned int width, unsigned int height) {
         GLuint glHandle = (GLuint)image.identifier();
         glBindTexture(GL_TEXTURE_2D, glHandle); TT_GL_DBG_ERR;
         GLenum internalFormat, channels, elementType;
         glFormatInfo(image.format(), internalFormat, channels, elementType); TT_GL_DBG_ERR;
         glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, width, height, 0, channels, elementType, nullptr); TT_GL_DBG_ERR;
         glBindTexture(GL_TEXTURE_2D, 0); TT_GL_DBG_ERR;
-        image.resized(width, height);
+    }
+
+    void OpenGLContext::resizeFbo(const FramebufferHandle& fbo, unsigned int width, unsigned int height) {
+        for(auto& image : fbo._colorAttachments)
+            resizeImage(image, width, height);
+        if(fbo._depthStencilAttachment)
+            resizeImage(*fbo._depthStencilAttachment, width, height);
     }
 
 	FramebufferHandle OpenGLContext::createFramebuffer(const std::vector<ImageHandle>& colorAttachments, ImageHandle* depthStencilAttachment) {
@@ -449,25 +475,21 @@ namespace TTRendering {
 
 		// Fetch the resolution of the first available attachment, we'll ensure all buffers have the same size
 		unsigned int width, height;
-		if (colorAttachments.size() > 0) {
-			width = colorAttachments[0].width();
-			height = colorAttachments[0].height();
-		} else {
-			width = depthStencilAttachment->width();
-			height = depthStencilAttachment->height();
-		}
+        if(depthStencilAttachment)
+            imageSize(*depthStencilAttachment, width, height);
+        else
+            imageSize(colorAttachments[0], width, height);
 
 		// Resolution check
 		for (const auto& colorAttachment : colorAttachments) {
-			TT::assert(width == colorAttachment.width() && height == colorAttachment.height());
+            unsigned int w, h;
+            imageSize(colorAttachment, w, h);
+			TT::assert(width == w && height == h);
 		}
 
 		// Verify the depth attachment is of a valid format
 		GLenum depthStencilMode;
 		if (depthStencilAttachment) {
-			// Resolution check
-			TT::assert(width == depthStencilAttachment->width() && height == depthStencilAttachment->height());
-
 			switch (depthStencilAttachment->format()) {
 			case ImageFormat::Depth32F:
 				depthStencilMode = GL_DEPTH_ATTACHMENT;
@@ -496,13 +518,108 @@ namespace TTRendering {
 		return FramebufferHandle(glHandle, colorAttachments, depthStencilAttachment);
 	}
 
+    const UniformInfo* OpenGLContext::materialUniformInfo(size_t shaderIdentifier) const {
+        // Get material uniform block info for this shader
+        TT::assert(shaderUniformInfo.find(shaderIdentifier) != shaderUniformInfo.end());
+        const auto& uniformBlocks = shaderUniformInfo.find(shaderIdentifier)->second;
+        auto it = uniformBlocks.find((int)UniformBlockSemantics::Material);
+        const UniformInfo* uniformInfo = nullptr;
+        if (it != uniformBlocks.end())
+            uniformInfo = &it->second;
+        return uniformInfo;
+    }
+
+    void OpenGLContext::bindAndAllocateMaterialUBO(const UniformInfo* uniformInfo) const {
+        if (uniformInfo) {
+            glBindBuffer(GL_UNIFORM_BUFFER, materialUbo);
+            size_t requiredBufferSize = uniformInfo->bufferSize;
+            if (materialUboSize < requiredBufferSize) {
+                glBufferData(GL_UNIFORM_BUFFER, requiredBufferSize, nullptr, GL_DYNAMIC_DRAW);
+                materialUboSize = requiredBufferSize;
+            }
+        }
+    }
+
+    const UniformInfo* OpenGLContext::useAndPrepareShader(size_t shaderIdentifier) const {
+        // Enable shader
+        glUseProgram((GLuint)shaderIdentifier);
+        // Get material uniform block info for this shader
+        const UniformInfo* uniformInfo = materialUniformInfo(shaderIdentifier);
+        // Allocate enough space
+        bindAndAllocateMaterialUBO(uniformInfo);
+        return uniformInfo;
+    }
+    
+    void OpenGLContext::applyMaterialBlendMode(const MaterialHandle& material) const {
+        auto blendMode = material.blendMode();
+        switch (blendMode) {
+        case TTRendering::MaterialBlendMode::Opaque:
+        case TTRendering::MaterialBlendMode::AlphaTest:
+            glDisable(GL_BLEND);
+            // glBlendFunc(GL_ONE, GL_ZERO);
+            break;
+        case TTRendering::MaterialBlendMode::Alpha:
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            break;
+        case TTRendering::MaterialBlendMode::PremultipliedAlpha:
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+            break;
+        case TTRendering::MaterialBlendMode::Additive:
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_ONE, GL_ONE);
+            break;
+        default:
+            TT::assertFatal(false);
+        }
+    }
+
+    void OpenGLContext::bindMaterialUBO(const UniformInfo* uniformInfo, const MaterialHandle& material) const {
+        if (uniformInfo) {
+            TT::assert(material._uniformBuffer != nullptr);
+            // Copy the data into the buffer
+            glBufferSubData(GL_UNIFORM_BUFFER, 0, uniformInfo->bufferSize, material._uniformBuffer);
+            // Map only the used portion of the buffer
+            glBindBufferRange(GL_UNIFORM_BUFFER, (GLuint)UniformBlockSemantics::Material, materialUbo, 0, uniformInfo->bufferSize);
+        }
+    }
+
+    void OpenGLContext::bindMaterialImages(const MaterialHandle& material, size_t shaderIdentifier) const {
+        unsigned int activeImage = 0;
+        for(const auto& pair : material._images) {
+            glActiveTexture(GL_TEXTURE0 + activeImage);
+            glBindTexture(GL_TEXTURE_2D, (GLuint)material._images.handle(pair.second).identifier());
+            glUniform1i(glGetUniformLocation((GLuint)shaderIdentifier, pair.first.data()), activeImage);
+            ++activeImage;
+        }
+    }
+
+    void OpenGLContext::bindMaterialSSBOs(const MaterialHandle& material, size_t shaderIdentifier) const {
+        for(const auto& pair : material._ssbos) {
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, (GLuint)material._ssbos.handle(pair.second).identifier());
+        }
+    }
+
+    void OpenGLContext::bindMaterialResources(const UniformInfo* uniformInfo, const MaterialHandle& material, size_t shaderIdentifier) const {
+        applyMaterialBlendMode(material);
+        bindMaterialUBO(uniformInfo, material);
+        bindMaterialImages(material, shaderIdentifier);
+        bindMaterialSSBOs(material, shaderIdentifier);
+    }
+
 	void OpenGLContext::drawPass(RenderPass& pass) {
 		if (pass.framebuffer.isEmpty()) {
 			glBindFramebuffer(GL_FRAMEBUFFER, 0);
 			glViewport(0, 0, screenWidth, screenHeight); TT_GL_DBG_ERR;
 		} else {
 			glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)pass.framebuffer.value()->identifier());
-			glViewport(0, 0, pass.framebuffer.value()->width(), pass.framebuffer.value()->height()); TT_GL_DBG_ERR;
+            unsigned int width, height;
+            if(pass.framebuffer.value()->_depthStencilAttachment)
+                imageSize(*pass.framebuffer.value()->_depthStencilAttachment, width, height);
+            else
+                imageSize(pass.framebuffer.value()->_colorAttachments[0], width, height);
+            glViewport(0, 0, width, height);
 		}
 
 		GLenum clearFlags = 0;
@@ -532,74 +649,18 @@ namespace TTRendering {
 			for (size_t shaderIndex = 0; shaderIndex < shaderQueue.keys.size(); ++shaderIndex) {
 				size_t shaderIdentifier = shaderQueue.keys[shaderIndex];
 
-				glUseProgram((GLuint)shaderIdentifier);
-
-				// Get material uniform block info for this shader
-				TT::assert(shaderUniformInfo.find(shaderIdentifier) != shaderUniformInfo.end());
-				const auto& uniformBlocks = shaderUniformInfo.find(shaderIdentifier)->second;
-				auto it = uniformBlocks.find((int)UniformBlockSemantics::Material);
-				const UniformInfo* uniformInfo = nullptr;
-				if (it != uniformBlocks.end())
-					uniformInfo = &it->second;
-
-				// Allocate enough space
-				if (uniformInfo) {
-					glBindBuffer(GL_UNIFORM_BUFFER, materialUbo);
-					size_t requiredBufferSize = uniformInfo->bufferSize;
-					if (materialUboSize < requiredBufferSize) {
-						glBufferData(GL_UNIFORM_BUFFER, requiredBufferSize, nullptr, GL_DYNAMIC_DRAW);
-						materialUboSize = requiredBufferSize;
-					}
-				}
+                const UniformInfo* uniformInfo = useAndPrepareShader((GLuint)shaderIdentifier);
 
 				const auto& materialQueue = shaderQueue.queues[shaderIndex];
 				for (size_t materialIndex = 0; materialIndex < materialQueue.keys.size(); ++materialIndex) {
 					const MaterialHandle& material = materialQueue.keys[shaderIndex];
 
-					// TODO: It is probably important to queue by blend-mode.
-					auto blendMode = material.blendMode();
-					switch (blendMode) {
-					case TTRendering::MaterialBlendMode::Opaque:
-					case TTRendering::MaterialBlendMode::AlphaTest:
-						glDisable(GL_BLEND);
-						// glBlendFunc(GL_ONE, GL_ZERO);
-						break;
-					case TTRendering::MaterialBlendMode::Alpha:
-						glEnable(GL_BLEND);
-						glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-						break;
-					case TTRendering::MaterialBlendMode::PremultipliedAlpha:
-						glEnable(GL_BLEND);
-						glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-						break;
-					case TTRendering::MaterialBlendMode::Additive:
-						glEnable(GL_BLEND);
-						glBlendFunc(GL_ONE, GL_ONE);
-						break;
-					default:
-						TT::assertFatal(false);
-					}
-
-					if (uniformInfo) {
-						TT::assert(material._uniformBuffer != nullptr);
-						// Copy the data into the buffer
-						glBufferSubData(GL_UNIFORM_BUFFER, 0, uniformInfo->bufferSize, material._uniformBuffer);
-						// Map only the used portion of the buffer
-						glBindBufferRange(GL_UNIFORM_BUFFER, (GLuint)UniformBlockSemantics::Material, materialUbo, 0, uniformInfo->bufferSize);
-					}
-
-                    unsigned int activeImage = 0;
-                    for(const auto& pair : material._images) {
-                        glActiveTexture(GL_TEXTURE0 + activeImage);
-                        glBindTexture(GL_TEXTURE_2D, (GLuint)material._images.handle(pair.second).identifier());
-                        glUniform1i(glGetUniformLocation((GLuint)shaderIdentifier, pair.first.data()), activeImage);
-                        ++activeImage;
-                    }
+                    bindMaterialResources(uniformInfo, material, shaderIdentifier);
 
 					const auto& meshQueue = materialQueue.queues[shaderIndex];
-					for (const auto& [meshIdentifier, pushConstants] : meshQueue) {
+					for (const auto& [meshIdentifier, pushConstants, instanceCount] : meshQueue) {
 						const MeshHandle* meshH = meshes.find(meshIdentifier);
-						TT::assert(meshH != nullptr);
+						TT::assertFatal(meshH != nullptr);
 						const MeshHandle& mesh = *meshH;
 						glBindVertexArray((GLuint)mesh.identifier());
 
@@ -607,11 +668,19 @@ namespace TTRendering {
 						glBufferData(GL_UNIFORM_BUFFER, sizeof(PushConstants), &pushConstants, GL_DYNAMIC_DRAW);
 
 						if (mesh.indexBuffer() != nullptr) {
-							glDrawElements(glPrimitiveType(mesh.primitiveType()), (GLsizei)mesh.numElements(), glIndexType(mesh.indexType()), nullptr);
+                            if(instanceCount > 0) {
+                                glDrawElementsInstanced(glPrimitiveType(mesh.primitiveType()), (GLsizei)mesh.numElements(), glIndexType(mesh.indexType()), nullptr, (GLsizei)instanceCount);
+                            } else {
+							    glDrawElements(glPrimitiveType(mesh.primitiveType()), (GLsizei)mesh.numElements(), glIndexType(mesh.indexType()), nullptr);
+                            }
 							TT_GL_DBG_ERR;
 						}
 						else {
-							glDrawArrays(glPrimitiveType(mesh.primitiveType()), 0, (GLsizei)mesh.numElements());
+                            if(instanceCount > 0) {
+							    glDrawArraysInstanced(glPrimitiveType(mesh.primitiveType()), 0, (GLsizei)mesh.numElements(), (GLsizei)instanceCount);
+                            } else {
+							    glDrawArrays(glPrimitiveType(mesh.primitiveType()), 0, (GLsizei)mesh.numElements());
+                            }
 							TT_GL_DBG_ERR;
 						}
 					}
@@ -624,4 +693,14 @@ namespace TTRendering {
 		glUseProgram(0);
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	}
+
+    void OpenGLContext::dispatchCompute(const MaterialHandle& material, unsigned int x, unsigned int y, unsigned int z) {
+        size_t shaderIdentifier = material.shader().identifier();
+        const UniformInfo* uniformInfo = useAndPrepareShader((GLuint)shaderIdentifier);
+        bindMaterialResources(uniformInfo, material, shaderIdentifier);
+        glDispatchCompute(x, y, z);
+        glMemoryBarrier(GL_ALL_BARRIER_BITS);
+        // Remnant to verify written data:
+        // TT::Vec3* points = (TT::Vec3*)glMapBuffer(GL_SHADER_STORAGE_BUFFER, GL_READ_ONLY);
+    }
 }

@@ -2,6 +2,8 @@
 #include <tt_window.h>
 #include "gl/tt_glcontext.h"
 
+#include <unordered_set>
+
 enum class EKeyState {
     // Lease significant bit is up/down, other bit is 'changed since last frame'.
     Press = 0b11,
@@ -11,61 +13,356 @@ enum class EKeyState {
 };
 
 struct Context {
-    TTRendering::RenderingContext* context;
+    // Rendering
+    TTRendering::RenderingContext* context = nullptr;
+
+    // Keyboard
     std::unordered_map<unsigned int, EKeyState> keyStates;
+
+    // Time
     double runtime;
     double deltaTime;
+
+    // Screen
     TT::Vec2 resolution;
+
+    // Active entities, order may be important
+    std::vector<class Entity*> entities;
+
+    // Shared rendering resources
+    // TODO: we should probably have a good way to track these, maybe a bunch of dicts? maybe a specific component that the user can edit? probably dicts...
+    TTRendering::NullableHandle<TTRendering::BufferHandle> quadVbo;
+    TTRendering::NullableHandle<TTRendering::MeshHandle> quadMesh;
+    TTRendering::NullableHandle<TTRendering::ShaderHandle> imageShader;
+    TTRendering::NullableHandle<TTRendering::ShaderHandle> instancedImageShader;
+    TTRendering::RenderPass mainPass;
+
+    TTRendering::NullableHandle<TTRendering::FramebufferHandle> fbo;
+    TTRendering::RenderPass fboTestPass;
 };
 
-struct Sprite {
-    TTRendering::ImageHandle* image;
-    TTRendering::MaterialHandle* material;
+enum class ComponentType {
+    Transform,
+    Sprite,
+    Particle,
 };
 
-struct Entity2D {
-    TT::Vec2 pos{};
-    TT::Vec2 size{}; // derived from image
-    float angle = 0.0f;
+#define DECL_COMPONENT_TYPE(LABEL, IS_SINGLE_USE) static const ComponentType componentType = ComponentType::LABEL; virtual ComponentType type() const override; static const bool isSingleUse = IS_SINGLE_USE;
+#define IMPL_COMPONENT_TYPE(LABEL) ComponentType LABEL::type() const { return ComponentType::LABEL; }
 
-    // TODO: Should this hold the init info? Should we provide it? We should probably do components instead and let the sprite component init itself during initREnderingResource, and it should own the push constants, and then have some system pull the transform matrix into that if valid.
-    Sprite initInfo;
+class Component {
+protected:
+    friend class Entity;
+    Entity& entity;
+    Component(Entity& entity) : entity(entity) {}
 
-    virtual void init() {
+public:
+    virtual ComponentType type() const = 0;
+    virtual void initRenderingResources(Context& context) {}
+    virtual void tick(Context& context) {}
+};
 
+class Entity {
+    std::unordered_map<ComponentType, std::vector<Component*>> _components;
+
+public:
+    Entity() {}
+    Entity(const Entity&) = delete;
+    Entity(Entity&&) = delete;
+    Entity& operator=(const Entity&) = delete;
+    Entity& operator=(Entity&&) = delete;
+
+    ~Entity() {
+        for(const auto& pair : _components)
+            for(Component* component : pair.second)
+                delete component;
     }
 
-    TT::Mat44 localMatrix() {
-        float sa = sin(-angle);
-        float ca = cos(-angle);
-        TT::Mat44 b {
-            ca * size.x, sa * size.x, 0.0f, 0.0f,
-            -sa * size.y, ca * size.y, 0.0f, 0.0f,
-            0.0f, 0.0f, 1.0f, 0.0f,
-            pos.x, pos.y, 0.0f, 1.0f,
-        };
-        return b * TT::Mat44::translate(-0.5f, -0.5f, 0.0f);
+    template<typename T> T* addComponent() {
+        auto it = _components.find(T::componentType);
+        if(T::isSingleUse && it != _components.end() && it->second.size() == 1) return nullptr;
+        T* component = new T(*this);
+        _components[T::componentType].push_back(component);
+        return component;
     }
+
+    template<typename T> T* component() const {
+        auto it = _components.find(T::componentType);
+        if(it == _components.end() || it->second.size() == 0)
+            return nullptr;
+        return (T*)it->second[0];
+    }
+
+    template<typename T> const std::vector<T*> components() const {
+        auto it = _components.find(T::componentType);
+        if(it == _components.end())
+            return {};
+        return it->second;
+    }
+
+    void initRenderingResources(Context& context) {
+        for(auto& pair : _components)
+            for(Component* component : pair.second)
+                component->initRenderingResources(context);
+    }
+
+    void tick(Context& context) {
+        for(auto& pair : _components)
+            for(Component* component : pair.second)
+                component->tick(context);
+    }
+};
+
+class Transform : public Component {
+protected:
+    using Component::Component;
+
+    Transform* _parent = nullptr;
+    std::unordered_set<Transform*> _children;
+
+    TT::Vec3 _translate = {0,0,0};
+    TT::Vec3 _radians = {0,0,0};
+    TT::Vec3 _scale = {1,1,1};
+    TT::ERotateOrder _rotateOrder = TT::ERotateOrder::YXZ;
+
+    TT::Mat44 _cachedLocalMatrix = TT::MAT44_IDENTITY;
+    bool _cachedLocalMatrixDirty = false;
+
+    TT::Mat44 _cachedWorldMatrix = TT::MAT44_IDENTITY;
+    bool _cachedWorldMatrixDirty = false;
+
+    void registerChild(Transform& child) {
+        _children.insert(&child);
+        dirtyPropagation(); 
+    }
+
+    void deregisterChild(Transform& child) { 
+        _children.erase(&child);
+        dirtyPropagation(); 
+    }
+
+    void dirtyPropagation() {
+        // If the local matrix changed, then so did the world matrix.
+        _cachedWorldMatrixDirty = true;
+
+        // If the world matrix changed, then the child world matrices also changed.
+        for(Transform* child : _children) {
+            child->dirtyPropagation();
+        }
+    }
+
+public:
+    DECL_COMPONENT_TYPE(Transform, true);
+    
+    Transform* parent() const { return _parent; }
+    const std::unordered_set<Transform*>& children() const { return _children; }
+
+    const TT::Vec3& translate() const { return _translate;}
+    const TT::Vec3& radians() const { return _radians;}
+    const TT::Vec3& scale() const { return _scale;}
+    TT::ERotateOrder rotateOrder() const { return _rotateOrder;}
+
+    void setTranslate(const TT::Vec3& translate) { 
+        if(_translate != translate) { 
+            _cachedLocalMatrixDirty = true; 
+            dirtyPropagation(); 
+        }
+        _translate = translate;
+    }
+
+    void setRadians(const TT::Vec3& radians) { 
+        if(_radians != radians) { 
+            _cachedLocalMatrixDirty = true;
+            dirtyPropagation(); 
+        }
+        _radians = radians; 
+    }
+
+    void setScale(const TT::Vec3& scale) { 
+        if(_scale != scale) { 
+            _cachedLocalMatrixDirty = true; 
+            dirtyPropagation(); 
+        }
+        _scale = scale; 
+    }
+
+    void setRotateOrder(TT::ERotateOrder rotateOrder) { 
+        if(_rotateOrder != rotateOrder) { 
+            _cachedLocalMatrixDirty = true; 
+            dirtyPropagation(); 
+        }
+        _rotateOrder = rotateOrder; 
+    }
+
+    const TT::Mat44& localMatrix() {
+        if(_cachedLocalMatrixDirty) {
+            _cachedLocalMatrix = TT::Mat44::TRS(_translate, _radians, _scale, _rotateOrder);
+            _cachedLocalMatrixDirty = false;
+        }
+        return _cachedLocalMatrix;
+    }
+
+    const TT::Mat44& worldMatrix() {
+        if(_cachedWorldMatrixDirty) {
+            if(_parent)
+                _cachedWorldMatrix = _parent->worldMatrix() * localMatrix();
+            else
+                _cachedWorldMatrix = localMatrix();
+            _cachedWorldMatrixDirty = false;
+        }
+        return _cachedWorldMatrix;
+    }
+
+    void setParent(Transform& parent) { 
+        if(_parent)
+            _parent->deregisterChild(*this); 
+        _parent = &parent; 
+        if(_parent)
+            _parent->registerChild(*this); 
+    }
+};
+
+IMPL_COMPONENT_TYPE(Transform);
+
+class Sprite : public Component {
+protected:
+    using Component::Component;
 
     TTRendering::PushConstants* pushConstants = nullptr;
+    Transform* transform = nullptr;
 
-    virtual void tick(const Context& tickContext) {
-        angle += tickContext.deltaTime;
-        if(pushConstants)
-            pushConstants->modelMatrix = localMatrix();
+public:
+    DECL_COMPONENT_TYPE(Sprite, true);
+
+    TTRendering::ImageHandle* image = nullptr;
+
+    void initRenderingResources(Context& context) override {
+        if(!image)
+            return;
+
+        TTRendering::MaterialHandle material = context.context->createMaterial(*context.imageShader, TTRendering::MaterialBlendMode::AlphaTest);
+        material.set("uImage", *image);
+        pushConstants = context.fboTestPass.addToDrawQueue(*context.quadMesh, material, {});
+        
+        transform = entity.component<Transform>();
+        // transform->setScale({ (float)image->width(), (float)image->height(), 1.0f });
+    }
+
+    void tick(Context& context) override {
+        if(transform && pushConstants)
+            pushConstants->modelMatrix = transform->worldMatrix();
     }
 };
+
+IMPL_COMPONENT_TYPE(Sprite);
+
+class Particle : public Sprite {
+protected:
+    using Sprite::Sprite;
+
+    const int instanceCount = 128;
+    
+    // TODO: Switch ssbo bindings on the fly so these can become global
+    TTRendering::NullableHandle<TTRendering::MaterialHandle> initMtl;
+    TTRendering::NullableHandle<TTRendering::MaterialHandle> tickMtl;
+
+public:
+    DECL_COMPONENT_TYPE(Particle, true);
+
+    void initRenderingResources(Context& context) override {
+        // Reimplemented from Sprite.
+        // if(!image) return;
+
+        // Generate particle positions in a buffer
+        TTRendering::BufferHandle ssbo = context.context->createBuffer(instanceCount * sizeof(float) * 6, nullptr, TTRendering::BufferMode::DynamicDraw);
+
+        {
+            initMtl = context.context->createMaterial(context.context->fetchShader({context.context->fetchShaderStage("particles.compute.glsl")}));
+            initMtl->set(0, ssbo);
+            context.context->dispatchCompute(*initMtl, instanceCount, 1, 1);
+        }
+
+        {
+            tickMtl = context.context->createMaterial(context.context->fetchShader({context.context->fetchShaderStage("particles_tick.compute.glsl")}));
+            tickMtl->set(0, ssbo);
+        }
+
+        // Build an instanced quad
+        TTRendering::MeshHandle instancedQuad = context.context->createMesh(
+            4, *context.quadVbo, { 
+                // vec2[4] vertex positions
+                { TTRendering::MeshAttribute::Dimensions::D2, TTRendering::MeshAttribute::ElementType::F32, 0 } 
+            }, 
+            nullptr, TTRendering::PrimitiveType::TriangleFan, 
+            instanceCount, &ssbo, {
+                // [vec3 position, vec3 velocity][instanceCount]
+                { TTRendering::MeshAttribute::Dimensions::D3, TTRendering::MeshAttribute::ElementType::F32, 1 },
+                { TTRendering::MeshAttribute::Dimensions::D3, TTRendering::MeshAttribute::ElementType::F32, 2 }
+            } 
+        );
+        
+        // Draw instanced particles
+        // TODO: these should be global / shared
+        TTRendering::MaterialHandle material = context.context->createMaterial(*context.instancedImageShader, TTRendering::MaterialBlendMode::AlphaTest);
+
+        std::vector<TTRendering::NullableHandle<TTRendering::ImageHandle>> images = {
+            context.context->loadImage("Sprites/Atari Tulip_01_large 600x600.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp),
+            context.context->loadImage("Sprites/Fanta blikje.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp),
+            context.context->loadImage("Sprites/Frikandel Speciaal.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp),
+            context.context->loadImage("Sprites/grolsch beugel.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp),
+            context.context->loadImage("Sprites/Jesus approves (1).png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp),
+            context.context->loadImage("Sprites/kaasaugurkui 400x400.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp),
+            context.context->loadImage("Sprites/kaasblokjes.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp),
+            context.context->loadImage("Sprites/Rookworst 600x400.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp),
+        };
+
+        int i = 0;
+        for(const auto& image : images) {
+            if(image) {
+                const char* label = TT::formatStr("uImage[%d]", i++);
+                material.set(label, *image);
+                delete[] label;
+            }
+            material.set("uImageCount", i);
+        }
+
+        pushConstants = context.fboTestPass.addToDrawQueue(instancedQuad, material, {}, instanceCount);
+
+        transform = entity.component<Transform>();
+    }
+
+    void tick(Context& context) override {
+        if(initMtl) {
+            if(context.keyStates[VK_SPACE] == EKeyState::Press) {
+                context.context->dispatchCompute(*initMtl, instanceCount, 1, 1);
+            }
+        }
+
+        if(tickMtl) {
+            tickMtl->set("uDeltaTime", (float)context.deltaTime);
+            context.context->dispatchCompute(*tickMtl, instanceCount, 1, 1);
+        }
+
+        if(transform && pushConstants) {
+            auto r = transform->radians();
+            r.y += (float)context.deltaTime;
+            transform->setRadians(r);
+
+            pushConstants->modelMatrix = transform->worldMatrix();
+        }
+    }
+};
+
+IMPL_COMPONENT_TYPE(Particle);
 
 const int SCREEN_WIDTH = 1920;
 const int SCREEN_HEIGHT = 1080;
-const int PIXEL_SIZE = 3;
+const int PIXEL_SIZE = 1;
 
 class App : public TT::Window {
 public:
     App() : TT::Window(), context(*this) {
         tickContext.context = &context;
-
-        show();
 
         // Resize the window to HD
         // TODO: Fullscreen
@@ -73,10 +370,12 @@ public:
         RECT r{ 0, 0, (int)SCREEN_WIDTH, (int)SCREEN_HEIGHT };
         AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, false);
         SetWindowPos(window, 0, 0, 0, r.right, r.bottom, SWP_NOMOVE);
+
+        show();
     }
 
     ~App() {
-        for (Entity2D* entity : scene)
+        for (Entity* entity : tickContext.entities)
             delete entity;
     }
 
@@ -84,7 +383,7 @@ public:
         tickContext.runtime = runtime;
         tickContext.deltaTime = deltaTime;
 
-        for (Entity2D* entity : scene) 
+        for (Entity* entity : tickContext.entities)
             entity->tick(tickContext);
 
         dropKeystates();
@@ -92,66 +391,97 @@ public:
 
 private:
     Context tickContext;
-    std::vector<Entity2D*> scene;
 
     bool sizeKnown = false;
     TTRendering::OpenGLContext context;
+    
+    TTRendering::UniformBlockHandle forwardPassUniforms;
 
-    TTRendering::RenderPass mainPass;
 
     void initRenderingResources() {
-        mainPass.clearColor = { 0.1f, 0.2f, 0.3f, 1.0f };
+        auto fbo_cd = context.createImage(width(), height(), TTRendering::ImageFormat::RGBA32F, TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp);
+        auto fbo_d = context.createImage(width(), height(), TTRendering::ImageFormat::Depth32F, TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp);
+        tickContext.fbo = context.createFramebuffer({fbo_cd}, &fbo_d);
+
+        tickContext.fboTestPass.clearColor = { 0.1f, 0.2f, 0.3f, 1.0f };
+        tickContext.fboTestPass.setFramebuffer(*tickContext.fbo);
+
+        tickContext.mainPass.clearColor = { 0.1f, 0.2f, 0.3f, 1.0f };
         
         // Get the sprite shader
-        TTRendering::ShaderHandle imageShader = context.fetchShader({ context.fetchShaderStage("image.vert.glsl"),context.fetchShaderStage("image.frag.glsl") });
+        tickContext.imageShader = context.fetchShader({ context.fetchShaderStage("image.vert.glsl"),context.fetchShaderStage("image.frag.glsl") });
+        tickContext.instancedImageShader = context.fetchShader({ context.fetchShaderStage("image_instanced.vert.glsl"),context.fetchShaderStage("image_instanced.frag.glsl") });
 
         // Get the UBO for that shader
-        TTRendering::UniformBlockHandle forwardPassUniforms = context.createUniformBuffer(imageShader, TTRendering::UniformBlockSemantics::Pass);
-
-        // Apply the view projection matrices
-        TT::Mat44 viewProjectionMatrix = TT::Mat44::orthoSymmetric(tickContext.resolution.x / PIXEL_SIZE, tickContext.resolution.y / PIXEL_SIZE, -1.0f, 1.0f);
-        forwardPassUniforms.set("uVP", viewProjectionMatrix);
-        mainPass.setPassUniforms(forwardPassUniforms);
+        forwardPassUniforms = context.createUniformBuffer(*tickContext.imageShader, TTRendering::UniformBlockSemantics::Pass);
+        tickContext.fboTestPass.setPassUniforms(forwardPassUniforms);
 
         // Get a quad
         float quadVerts[] = {0,0, 1,0, 1,1, 0,1};
-        TTRendering::BufferHandle quadVbo = context.createBuffer(sizeof(quadVerts), (unsigned char*)quadVerts);
-        TTRendering::MeshHandle quad = context.createMesh({ { TTRendering::MeshAttribute::Dimensions::D2, TTRendering::MeshAttribute::ElementType::F32, 0 } }, quadVbo, 4, nullptr, TTRendering::PrimitiveType::TriangleFan);
+        tickContext.quadVbo = context.createBuffer(sizeof(quadVerts), (unsigned char*)quadVerts);
+        tickContext.quadMesh = context.createMesh(4, *tickContext.quadVbo, { { TTRendering::MeshAttribute::Dimensions::D2, TTRendering::MeshAttribute::ElementType::F32, 0 } }, nullptr, TTRendering::PrimitiveType::TriangleFan);
 
-        // For each sprite, create a material
-        auto maybe = context.loadImage("frikandel.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp);
-        TT::assertFatal(!maybe.isEmpty());
-        TTRendering::MaterialHandle frikandel = context.createMaterial(imageShader, TTRendering::MaterialBlendMode::AlphaTest);
-        frikandel.set("uImage", *maybe.value());
-        
-        // Spawn an entity with a sprite material to use
-        scene.push_back(new Entity2D());
-        scene.back()->pushConstants = mainPass.addToDrawQueue(quad, frikandel, {});
-        scene.back()->size = { (float)maybe.value()->width(), (float)maybe.value()->height() };
+        // TODO: There is something fishy going on with the order of things; if I swap the entity order I only see the particles.
+        tickContext.entities.push_back(new Entity);
+        tickContext.entities.back()->addComponent<Transform>();
+        tickContext.entities.back()->addComponent<Particle>();
+
+        // Spawn an entity with a sprite to use
+        auto frikandel = context.loadImage("Sprites/Frikandel Speciaal.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp);
+        TT::assertFatal(frikandel);
+        tickContext.entities.push_back(new Entity);
+
+        {
+            unsigned int w, h; 
+            context.imageSize(*frikandel, w, h);
+            tickContext.entities.back()->addComponent<Transform>()->setScale({(float)w, (float)h, 1.0f});
+            tickContext.entities.back()->component<Transform>()->setTranslate({(float)w * -0.5f, (float)h * -0.5f, 0.0f});
+            tickContext.entities.back()->addComponent<Sprite>()->image = frikandel;
+        }
+
+        for(Entity* entity : tickContext.entities)
+            entity->initRenderingResources(tickContext);
+
+        auto blitMaterial = context.createMaterial(context.fetchShader({ context.fetchShaderStage("noop.vert.glsl"), context.fetchShaderStage("blit.frag.glsl") }));
+        blitMaterial.set("uImage", fbo_cd);
+        tickContext.mainPass.addToDrawQueue(*tickContext.quadMesh, blitMaterial, {});
     }
 
     void onResizeEvent(const TT::ResizeEvent& event) override {
-        tickContext.resolution = TT::Vec2(event.width, event.height);
+        tickContext.resolution = TT::Vec2((float)event.width, (float)event.height);
         context.windowResized(event.width, event.height);
-        if (!sizeKnown)
+
+        if (!sizeKnown) { 
+            sizeKnown = true;
             initRenderingResources();
+        } else {
+            context.resizeFbo(*tickContext.fbo, event.width, event.height);
+        }
     }
 
     void onPaintEvent(const TT::PaintEvent& event) override {
+        // Apply the view projection matrices
+        // TT::Mat44 viewProjectionMatrix = TT::Mat44::orthoSymmetric(tickContext.resolution.x / PIXEL_SIZE, tickContext.resolution.y / PIXEL_SIZE, -1000.0f, 1000.0f);
+        TT::Mat44 uP = TT::Mat44::perspectiveY(1.0, tickContext.resolution.x / tickContext.resolution.y, zoom * 0.1f, zoom * 10.0f);
+        TT::Mat44 uV = TT::Mat44::rotate(tilt, orbit, 0.0f, TT::ERotateOrder::YXZ) * TT::Mat44::translate(0.0f, 0.0f, -zoom);
+        uV = TT::Mat44::translate(origin) * uV;
+        forwardPassUniforms.set("uVP", uV * uP);
+
         context.beginFrame();
-        context.drawPass(mainPass);
+        context.drawPass(tickContext.fboTestPass);
+        context.drawPass(tickContext.mainPass);
         context.endFrame();
     }
 
     void dropKeystates() {
-        for (auto pair : tickContext.keyStates) {
+        for (auto& pair : tickContext.keyStates) {
             pair.second = (EKeyState)((int)pair.second & 0b1);
         }
     }
 
     void onKeyEvent(const TT::KeyEvent& event) override {
         if (event.type == TT::Event::EType::KeyDown) {
-            // if (event.isRepeat) return; // TODO: isRepeat is/was bugged
+            if (event.isRepeat) return;
             tickContext.keyStates[event.key] = EKeyState::Press;
         }
 
@@ -159,6 +489,50 @@ private:
             tickContext.keyStates[event.key] = EKeyState::Release;
         }
     }
+
+    TT::Vec3 origin = {};
+    float orbit = 0.0f;
+    float tilt = 0.0f;
+    float zoom = 1000.0f;
+    float dragStartOrbit = 0.0f;
+    float dragStartTilt = 0.0f;
+    int dragStartX = 0;
+    int dragStartY = 0;
+    bool dragPanAction = false;
+    TT::Vec3 dragStartOrigin = {};
+    TT::Mat44 dragPanSpace = {};
+
+    void onMouseEvent(const TT::MouseEvent& event) override {
+        if (event.type == TT::Event::EType::MouseDown) {
+            if(event.button == 2) {
+                dragPanAction = true;
+                dragStartOrigin = origin;
+                dragPanSpace = TT::Mat44::rotate(-tilt, -orbit, 0.0f, TT::ERotateOrder::ZXY);
+            } else {
+                dragPanAction = false;
+                dragStartOrbit = orbit;
+                dragStartTilt = tilt;
+            }
+            dragStartX = event.x;
+            dragStartY = event.y;
+        }
+
+        if (event.type == TT::Event::EType::MouseMove) {
+            float dx = (event.x - dragStartX) * 0.001f;
+            float dy = (event.y - dragStartY) * 0.001f;
+            if(dragPanAction) {
+                origin = dragStartOrigin + TT::Vec3(dragPanSpace.col[0]) * (dx * zoom * 0.5f) + TT::Vec3(dragPanSpace.col[1]) * -(dy * zoom * 0.5f);
+            } else {
+                orbit = dragStartOrbit + dx;
+                tilt = dragStartTilt + dy;
+            }
+        }
+    }
+
+    void onWheelEvent(const TT::WheelEvent& event) override {
+        zoom *= pow(1.0001f, -event.delta * 4);
+    }
+
 };
 
 int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPSTR lpCmdLine, _In_ int nShowCmd) {
@@ -173,11 +547,6 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     constexpr ULONGLONG FPS = 30;
     constexpr ULONGLONG t = 1000 / FPS;
     double runtime = 0.0;
-
-#if 0
-    ULONGLONG counter = 0;
-    int frames = 0;
-#endif
 
     do {
         while (PeekMessage(&msg, 0, 0, 0, PM_REMOVE)) {
@@ -205,23 +574,6 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
         b = a - b;
         
         if (b < t) Sleep((DWORD)(t - b));
-
-#if 0
-        // track nr of ms elapsed by adding delta time
-        counter += b;
-        // increment frame counter
-        frames += 1;
-        if(counter > 1000) {
-            // display frames per second once per second and reset
-            auto str = TT::formatStr("%d FPS\n", frames);
-            OutputDebugStringA(str);
-            // does not work for some weird reson
-            SetWindowTextA(window.windowHandle(), str);
-            delete[] str;
-            frames = 0;
-            counter %= 1000;
-        }
-#endif
     } while (!quit);
     return (int)msg.wParam;
 }
