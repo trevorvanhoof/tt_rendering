@@ -215,40 +215,46 @@ namespace TTRendering {
 	
 	MaterialBlendMode MaterialHandle::blendMode() const { return _blendMode; }
 
-	std::vector<RenderPass::DrawInfo>& RenderPass::DrawQueue::ShaderQueue::MaterialQueue::fetch(const MaterialHandle& key) {
+    MeshQueue& MaterialQueue::fetch(const MaterialHandle& key, size_t& index) {
 		// Ensure we have a queue with this material instance
 		auto it = materialIdentifierToQueueIndex.find((size_t)&key);
 		if (it == materialIdentifierToQueueIndex.end()) {
 			materialIdentifierToQueueIndex[(size_t)&key] = queues.size();
 			keys.push_back(key); // store a copy of all handle info because materials are not managed by the context
+            index = queues.size();
 			return queues.emplace_back();
-		}
-		else
+		} else {
+            index = it->second;
 			return queues[it->second];
+        }
 	}
 
-	RenderPass::DrawQueue::ShaderQueue::MaterialQueue& RenderPass::DrawQueue::ShaderQueue::fetch(size_t key) {
+	MaterialQueue& ShaderQueue::fetch(size_t key, size_t& index) {
 		// Ensure we have a queue with this shader
 		auto it = shaderIdentifierToQueueIndex.find(key);
 		if (it == shaderIdentifierToQueueIndex.end()) {
 			shaderIdentifierToQueueIndex[key] = queues.size();
 			keys.push_back(key);
+            index = queues.size();
 			return queues.emplace_back();
-		}
-		else
+		} else {
+            index = it->second;
 			return queues[it->second];
+        }
 	}
 
-	RenderPass::DrawQueue::ShaderQueue& RenderPass::DrawQueue::fetch(size_t key) {
+	ShaderQueue& DrawQueue::fetch(size_t key, size_t& index) {
 		// Ensure we have a queue with this mesh layout
 		auto it = meshLayoutHashToQueueIndex.find(key);
 		if (it == meshLayoutHashToQueueIndex.end()) {
 			meshLayoutHashToQueueIndex[key] = queues.size();
 			keys.push_back(key);
+            index = queues.size();
 			return queues.emplace_back();
-		}
-		else
+		} else {
+            index = it->second;
 			return queues[it->second];
+        }
 	}
 
 	void RenderPass::setPassUniforms(UniformBlockHandle handle) {
@@ -271,11 +277,22 @@ namespace TTRendering {
 		modified = true;
 	}
 
-    PushConstants* RenderPass::addToDrawQueue(const MeshHandle& mesh, const MaterialHandle& material, const PushConstants& pushConstants, size_t instanceCount) {
-        auto& queue = drawQueue.fetch(mesh._meshLayoutHash).fetch(material._shader.identifier()).fetch(material);
-        queue.push_back(DrawInfo(mesh.identifier(), pushConstants, instanceCount));
+    RenderEntry RenderPass::addToDrawQueue(const MeshHandle& mesh, const MaterialHandle& material, const PushConstants& pushConstants, size_t instanceCount) {
+        RenderEntry result;
+        auto& queue = drawQueue
+            .fetch(mesh._meshLayoutHash, result.meshLayoutQueueIndex)
+            .fetch(material._shader.identifier(), result.shaderQueueIndex)
+            .fetch(material, result.materialQueueIndex);
+        result.meshIndex = queue.next++;
+        queue.queue[result.meshIndex] = DrawInfo(mesh.identifier(), pushConstants, instanceCount);
+        result.pushConstants = &queue.queue[result.meshIndex].pushConstants;
         modified = true;
-        return &queue.back().pushConstants;
+        return result;
+    }
+
+    void RenderPass::removeFromDrawQueue(const RenderEntry& entry) {
+        drawQueue.queues[entry.meshLayoutQueueIndex].queues[entry.shaderQueueIndex].queues[entry.materialQueueIndex].queue.erase(entry.meshIndex);
+        modified = true;
     }
 
     void RenderPass::emptyQueue() {

@@ -29,7 +29,7 @@ namespace {
 
 		context.verts.alloc(FONS_VERTEX_COUNT * sizeof(float) * 2, GL_ARRAY_BUFFER, nullptr, GL_DYNAMIC_DRAW);
 		context.coords.alloc(FONS_VERTEX_COUNT * sizeof(float) * 2, GL_ARRAY_BUFFER, nullptr, GL_DYNAMIC_DRAW);
-		context.colors.alloc(FONS_VERTEX_COUNT * sizeof(float) * 2, GL_ARRAY_BUFFER, nullptr, GL_DYNAMIC_DRAW);
+		context.colors.alloc(FONS_VERTEX_COUNT * sizeof(unsigned char) * 4, GL_ARRAY_BUFFER, nullptr, GL_DYNAMIC_DRAW);
 
 		context.vao.alloc();
 

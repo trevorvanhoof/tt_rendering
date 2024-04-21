@@ -462,11 +462,11 @@ namespace TTRendering {
         glBindTexture(GL_TEXTURE_2D, 0); TT_GL_DBG_ERR;
     }
 
-    void OpenGLContext::resizeFbo(const FramebufferHandle& fbo, unsigned int width, unsigned int height) {
-        for(auto& image : fbo._colorAttachments)
+    void OpenGLContext::resizeFramebuffer(const FramebufferHandle& framebuffer, unsigned int width, unsigned int height) {
+        for(auto& image : framebuffer._colorAttachments)
             resizeImage(image, width, height);
-        if(fbo._depthStencilAttachment)
-            resizeImage(*fbo._depthStencilAttachment, width, height);
+        if(framebuffer._depthStencilAttachment)
+            resizeImage(*framebuffer._depthStencilAttachment, width, height);
     }
 
 	FramebufferHandle OpenGLContext::createFramebuffer(const std::vector<ImageHandle>& colorAttachments, ImageHandle* depthStencilAttachment) {
@@ -556,18 +556,22 @@ namespace TTRendering {
         case TTRendering::MaterialBlendMode::Opaque:
         case TTRendering::MaterialBlendMode::AlphaTest:
             glDisable(GL_BLEND);
+            glDepthMask(true);
             // glBlendFunc(GL_ONE, GL_ZERO);
             break;
         case TTRendering::MaterialBlendMode::Alpha:
             glEnable(GL_BLEND);
+            glDepthMask(false);
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
             break;
         case TTRendering::MaterialBlendMode::PremultipliedAlpha:
             glEnable(GL_BLEND);
+            glDepthMask(false);
             glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
             break;
         case TTRendering::MaterialBlendMode::Additive:
             glEnable(GL_BLEND);
+            glDepthMask(false);
             glBlendFunc(GL_ONE, GL_ONE);
             break;
         default:
@@ -608,19 +612,38 @@ namespace TTRendering {
         bindMaterialSSBOs(material, shaderIdentifier);
     }
 
-	void OpenGLContext::drawPass(RenderPass& pass) {
-		if (pass.framebuffer.isEmpty()) {
-			glBindFramebuffer(GL_FRAMEBUFFER, 0);
-			glViewport(0, 0, screenWidth, screenHeight); TT_GL_DBG_ERR;
-		} else {
-			glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)pass.framebuffer.value()->identifier());
+    void OpenGLContext::framebufferSize(const FramebufferHandle& framebuffer, unsigned int& width, unsigned int& height) const {
+        if(framebuffer._depthStencilAttachment)
+            return imageSize(*framebuffer._depthStencilAttachment, width, height);
+        TT::assert(framebuffer._colorAttachments.size() > 0);
+        return imageSize(framebuffer._colorAttachments[0], width, height);
+    }
+
+#if 0
+    void OpenGLContext::bindFramebuffer(const TTRendering::FramebufferHandle* framebuffer) {
+        if (!framebuffer) {
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glViewport(0, 0, screenWidth, screenHeight); TT_GL_DBG_ERR;
+        } else {
+            glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)framebuffer->identifier());
             unsigned int width, height;
-            if(pass.framebuffer.value()->_depthStencilAttachment)
-                imageSize(*pass.framebuffer.value()->_depthStencilAttachment, width, height);
-            else
-                imageSize(pass.framebuffer.value()->_colorAttachments[0], width, height);
+            framebufferSize(*framebuffer, width, height);
             glViewport(0, 0, width, height);
-		}
+        }
+    }
+#endif
+
+	void OpenGLContext::drawPass(RenderPass& pass) {
+        // bindFramebuffer((const TTRendering::FramebufferHandle*)pass.framebuffer);
+        if (!pass.framebuffer) {
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glViewport(0, 0, screenWidth, screenHeight); TT_GL_DBG_ERR;
+        } else {
+            glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)pass.framebuffer->identifier());
+            unsigned int width, height;
+            framebufferSize(*pass.framebuffer, width, height);
+            glViewport(0, 0, width, height);
+        }
 
 		GLenum clearFlags = 0;
 
@@ -658,7 +681,8 @@ namespace TTRendering {
                     bindMaterialResources(uniformInfo, material, shaderIdentifier);
 
 					const auto& meshQueue = materialQueue.queues[shaderIndex];
-					for (const auto& [meshIdentifier, pushConstants, instanceCount] : meshQueue) {
+					for (const auto& pair : meshQueue) {
+                        const auto& [meshIdentifier, pushConstants, instanceCount] = pair.second;
 						const MeshHandle* meshH = meshes.find(meshIdentifier);
 						TT::assertFatal(meshH != nullptr);
 						const MeshHandle& mesh = *meshH;
@@ -692,6 +716,8 @@ namespace TTRendering {
 		glBindBuffer(GL_UNIFORM_BUFFER, 0);
 		glUseProgram(0);
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glDisable(GL_BLEND);
+        glDepthMask(true);
 	}
 
     void OpenGLContext::dispatchCompute(const MaterialHandle& material, unsigned int x, unsigned int y, unsigned int z) {

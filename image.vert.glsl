@@ -4,6 +4,8 @@ layout(std140, binding = 1) uniform PassInfo {
 	mat4 uVP;
 };
 
+// layout(std140, binding = 2) uniform MaterialInfo {};
+
 layout(push_constant) uniform PushConstants {
 	mat4 uModelMatrix;
 	mat4 uExtraData;

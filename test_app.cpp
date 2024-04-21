@@ -1,6 +1,8 @@
 #include <windont.h>
 #include <tt_window.h>
+#include <tt_files.h>
 #include "gl/tt_glcontext.h"
+#include "gl/tt_gl_rendering_fontstash.h"
 
 #include <unordered_set>
 
@@ -12,7 +14,7 @@ enum class EKeyState {
     Up = 0b00,
 };
 
-struct Context {
+struct TickContext {
     // Rendering
     TTRendering::RenderingContext* context = nullptr;
 
@@ -45,6 +47,7 @@ enum class ComponentType {
     Transform,
     Sprite,
     Particle,
+    Font,
 };
 
 #define DECL_COMPONENT_TYPE(LABEL, IS_SINGLE_USE) static const ComponentType componentType = ComponentType::LABEL; virtual ComponentType type() const override; static const bool isSingleUse = IS_SINGLE_USE;
@@ -58,8 +61,8 @@ protected:
 
 public:
     virtual ComponentType type() const = 0;
-    virtual void initRenderingResources(Context& context) {}
-    virtual void tick(Context& context) {}
+    virtual void initRenderingResources(TickContext& context) {}
+    virtual void tick(TickContext& context) {}
 };
 
 class Entity {
@@ -100,13 +103,13 @@ public:
         return it->second;
     }
 
-    void initRenderingResources(Context& context) {
+    void initRenderingResources(TickContext& context) {
         for(auto& pair : _components)
             for(Component* component : pair.second)
                 component->initRenderingResources(context);
     }
 
-    void tick(Context& context) {
+    void tick(TickContext& context) {
         for(auto& pair : _components)
             for(Component* component : pair.second)
                 component->tick(context);
@@ -236,25 +239,159 @@ public:
 
     TTRendering::ImageHandle* image = nullptr;
 
-    void initRenderingResources(Context& context) override {
+    void initRenderingResources(TickContext& context) override {
         if(!image)
             return;
 
         TTRendering::MaterialHandle material = context.context->createMaterial(*context.imageShader, TTRendering::MaterialBlendMode::AlphaTest);
         material.set("uImage", *image);
-        pushConstants = context.fboTestPass.addToDrawQueue(*context.quadMesh, material, {});
+        pushConstants = context.fboTestPass.addToDrawQueue(*context.quadMesh, material, {}).pushConstants;
         
         transform = entity.component<Transform>();
-        // transform->setScale({ (float)image->width(), (float)image->height(), 1.0f });
     }
 
-    void tick(Context& context) override {
+    void tick(TickContext& context) override {
         if(transform && pushConstants)
             pushConstants->modelMatrix = transform->worldMatrix();
     }
 };
 
 IMPL_COMPONENT_TYPE(Sprite);
+
+class Font : public Component {
+    using Component::Component;
+
+    // TODO: This be global
+    FONScontext* fs;
+    // TODO: This be global
+    int fontNormal;
+    struct FONSpoint {
+        float x, y, u, v;
+        unsigned int cd;
+    };
+    static void layoutText(FONScontext* fs, std::vector<FONSpoint>& layout, const std::string& text, float& x, float& y, unsigned int color = 0, bool noClear = false) {
+        if (noClear) {
+            layout.reserve(layout.size() + text.size());
+        } else {
+            layout.clear();
+            layout.reserve(text.size());
+        }
+        FONStextIter iter;
+        fonsTextIterInit(fs, &iter, x, y, text.data(), text.data() + text.size());
+        FONSquad q;
+        while (fonsTextIterNext(fs, &iter, &q)) {
+            layout.push_back({q.x0,q.y0,q.s0,q.t0,color});
+            layout.push_back({q.x1,q.y1,q.s1,q.t1,color});
+        }
+        x = iter.x;
+        y = iter.y;
+        // This is where the used glyphs are actually submitted to the texture.
+        // It can also try to emit triangles but since we don't submit any draw commands via fontstash that is avoided.
+        fonsFlush(fs); 
+    }
+
+    std::string _prevText;
+    TTRendering::RenderEntry entry;
+    Transform* transform = nullptr;
+
+public:
+    DECL_COMPONENT_TYPE(Font, true);
+
+    std::string text = "Hello World!";
+
+    void initRenderingResources(TickContext& context) override {
+        // TODO: Investigate multiple texture pooling and unlimited font count of https://github.com/akrinke/Font-Stash
+        // Create GL stash for 512x512 texture, our coordinate system has zero at top-left.
+        fs = glfonsCreate(512, 512, FONS_ZERO_BOTTOMLEFT, context.context);
+        // Add font to stash.
+        fontNormal = fonsAddFont(fs, "sans", "C:\\Windows\\fonts\\arial.ttf"); // "DroidSerif-Regular.ttf");
+        auto shader = context.context->fetchShader({
+            context.context->fetchShaderStage("fontstash.vert.glsl"), 
+            context.context->fetchShaderStage("fontstash.geom.glsl"), 
+            context.context->fetchShaderStage("fontstash.frag.glsl")});
+        
+        // Per text mesh we may want a unique material so we can colorize
+        auto material = context.context->createMaterial(shader, TTRendering::MaterialBlendMode::Alpha);
+        material.set("uImage", glFonsAtlas(fs));
+
+        std::vector<FONSpoint> layout;
+        /*fonsSetFont(fs, fontNormal);
+        fonsSetSize(fs, 124.0f);
+        layoutText(fs, layout, text, 0, 0, false);*/
+
+        float dx = 10, dy = 100;
+        unsigned int white = glfonsRGBA(255,255,255,255);
+        unsigned int brown = glfonsRGBA(192,128,0,128);
+        fonsSetFont(fs, fontNormal);
+        fonsSetSize(fs, 124.0f);
+        layoutText(fs, layout, "The big ", dx, dy, white, false);
+        fonsSetSize(fs, 24.0f);
+        layoutText(fs, layout, "brown fox", dx, dy, brown, true);
+
+        auto vbo = context.context->createBuffer(layout.size() * sizeof(FONSpoint), (unsigned char*)&layout[0]);
+        auto mesh = context.context->createMesh(layout.size() * 2, vbo, {
+            // alternating top left and bottom right points
+            { TTRendering::MeshAttribute::Dimensions::D2, TTRendering::MeshAttribute::ElementType::F32, 0 },
+            { TTRendering::MeshAttribute::Dimensions::D2, TTRendering::MeshAttribute::ElementType::F32, 1 },
+            { TTRendering::MeshAttribute::Dimensions::D1, TTRendering::MeshAttribute::ElementType::U32, 2 },
+        }, nullptr, TTRendering::PrimitiveType::Line);
+
+        entry = context.fboTestPass.addToDrawQueue(mesh, material, {});
+        _prevText = text;
+
+        transform = entity.component<Transform>();
+    }
+
+    void tick(TickContext& context) override {
+        if(transform && entry.pushConstants)
+            entry.pushConstants->modelMatrix = transform->worldMatrix();
+    }
+
+    /*
+    void layoutText(UIContext& painter, std::vector<FONSquad>& layout, const std::string& text, int x, int y, bool noClear = false) {
+	    if (noClear) {
+		    layout.reserve(layout.size() + text.size());
+	    }
+	    else {
+		    layout.clear();
+		    layout.reserve(text.size());
+	    }
+	    FONStextIter iter;
+	    fonsTextIterInit(painter.fs, &iter, (float)x, (float)y, text.data(), text.data() + text.size());
+	    FONSquad q;
+	    while (fonsTextIterNext(painter.fs, &iter, &q))
+		    layout.push_back(q);
+    }
+
+    void drawText(UIContext& painter, const std::vector<FONSquad>& layout) {
+	    for (const FONSquad& q : layout)
+		    fonsEmitQuad(painter.fs, q);
+	    fonsFlush(painter.fs);
+    }
+    */
+
+#if 0
+    void render(TickContext& context, unsigned int viewportWidth, unsigned int viewportHeight) {
+        // Render some text in immediate mode
+        glFonsSetResolution(fs, viewportWidth, viewportHeight);
+
+        float dx = 10, dy = 100;
+        unsigned int white = glfonsRGBA(255,255,255,255);
+        unsigned int brown = glfonsRGBA(192,128,0,128);
+
+        fonsSetFont(fs, fontNormal);
+        fonsSetSize(fs, 124.0f);
+        fonsSetColor(fs, white);
+        fonsDrawText(fs, dx,dy,"The big ", NULL);
+
+        fonsSetSize(fs, 24.0f);
+        fonsSetColor(fs, brown);
+        fonsDrawText(fs, dx,dy,"brown fox", NULL);
+    }
+#endif
+};
+
+IMPL_COMPONENT_TYPE(Font);
 
 class Particle : public Sprite {
 protected:
@@ -269,7 +406,7 @@ protected:
 public:
     DECL_COMPONENT_TYPE(Particle, true);
 
-    void initRenderingResources(Context& context) override {
+    void initRenderingResources(TickContext& context) override {
         // Reimplemented from Sprite.
         // if(!image) return;
 
@@ -326,12 +463,12 @@ public:
             material.set("uImageCount", i);
         }
 
-        pushConstants = context.fboTestPass.addToDrawQueue(instancedQuad, material, {}, instanceCount);
+        pushConstants = context.fboTestPass.addToDrawQueue(instancedQuad, material, {}, instanceCount).pushConstants;
 
         transform = entity.component<Transform>();
     }
 
-    void tick(Context& context) override {
+    void tick(TickContext& context) override {
         if(initMtl) {
             if(context.keyStates[VK_SPACE] == EKeyState::Press) {
                 context.context->dispatchCompute(*initMtl, instanceCount, 1, 1);
@@ -390,13 +527,12 @@ public:
     }
 
 private:
-    Context tickContext;
+    TickContext tickContext;
 
     bool sizeKnown = false;
     TTRendering::OpenGLContext context;
     
     TTRendering::UniformBlockHandle forwardPassUniforms;
-
 
     void initRenderingResources() {
         auto fbo_cd = context.createImage(width(), height(), TTRendering::ImageFormat::RGBA32F, TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp);
@@ -421,22 +557,30 @@ private:
         tickContext.quadVbo = context.createBuffer(sizeof(quadVerts), (unsigned char*)quadVerts);
         tickContext.quadMesh = context.createMesh(4, *tickContext.quadVbo, { { TTRendering::MeshAttribute::Dimensions::D2, TTRendering::MeshAttribute::ElementType::F32, 0 } }, nullptr, TTRendering::PrimitiveType::TriangleFan);
 
-        // TODO: There is something fishy going on with the order of things; if I swap the entity order I only see the particles.
-        tickContext.entities.push_back(new Entity);
-        tickContext.entities.back()->addComponent<Transform>();
-        tickContext.entities.back()->addComponent<Particle>();
-
-        // Spawn an entity with a sprite to use
-        auto frikandel = context.loadImage("Sprites/Frikandel Speciaal.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp);
-        TT::assertFatal(frikandel);
-        tickContext.entities.push_back(new Entity);
-
         {
+            // Spawn an entity with a sprite to use
+            tickContext.entities.push_back(new Entity);
+
+            auto frikandel = context.loadImage("Sprites/Frikandel Speciaal.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp);
+            TT::assertFatal(frikandel);
             unsigned int w, h; 
             context.imageSize(*frikandel, w, h);
             tickContext.entities.back()->addComponent<Transform>()->setScale({(float)w, (float)h, 1.0f});
             tickContext.entities.back()->component<Transform>()->setTranslate({(float)w * -0.5f, (float)h * -0.5f, 0.0f});
             tickContext.entities.back()->addComponent<Sprite>()->image = frikandel;
+        }
+
+        {
+            // TODO: There is something fishy going on with the order of things; if I swap the entity order I only see the particles.
+            tickContext.entities.push_back(new Entity);
+            tickContext.entities.back()->addComponent<Transform>();
+            tickContext.entities.back()->addComponent<Particle>();
+        }
+
+        {
+            // tickContext.entities.push_back(new Entity);
+            // tickContext.entities.back()->addComponent<Transform>()->setScale({100.0f, 100.0f, 100.0f});
+            // tickContext.entities.back()->addComponent<Font>();
         }
 
         for(Entity* entity : tickContext.entities)
@@ -455,7 +599,7 @@ private:
             sizeKnown = true;
             initRenderingResources();
         } else {
-            context.resizeFbo(*tickContext.fbo, event.width, event.height);
+            context.resizeFramebuffer(*tickContext.fbo, event.width, event.height);
         }
     }
 
@@ -469,6 +613,8 @@ private:
 
         context.beginFrame();
         context.drawPass(tickContext.fboTestPass);
+        // context.bindFramebuffer(tickContext.fbo);
+        // fontTest->render(tickContext, width(), height());
         context.drawPass(tickContext.mainPass);
         context.endFrame();
     }
@@ -530,9 +676,8 @@ private:
     }
 
     void onWheelEvent(const TT::WheelEvent& event) override {
-        zoom *= pow(1.0001f, -event.delta * 4);
+        zoom *= powf(1.0001f, -event.delta * 4.0f);
     }
-
 };
 
 int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPSTR lpCmdLine, _In_ int nShowCmd) {

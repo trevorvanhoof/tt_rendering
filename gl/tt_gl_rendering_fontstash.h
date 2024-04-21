@@ -1,50 +1,54 @@
 #pragma once
 
 // #include "gl/tt_render_concepts.h"
+#include <ThirdParty/fontstash/fontstash.h>
 #include "tt_rendering.h"
 
 FONScontext* glfonsCreate(int width, int height, int flags, TTRendering::RenderingContext* renderContext);
 void glfonsDelete(FONScontext* ctx);
-void glFonsSetResolution(FONScontext* ctx, int width, int height);
+// void glFonsSetResolution(FONScontext* ctx, int width, int height);
+const TTRendering::ImageHandle& glFonsAtlas(FONScontext* ctx);
 unsigned int glfonsRGBA(unsigned char r, unsigned char g, unsigned char b, unsigned char a);
 
 #ifdef GLFONTSTASH_IMPLEMENTATION
 #include "fontstash/fontstash.h"
+#include "tt_glcontext.h"
 
 namespace {
-	struct Context {
+	struct FonsGLContext {
         TTRendering::RenderingContext* context;
         TTRendering::ImageHandle image;
-        TTRendering::MaterialHandle material;
-        TTRendering::BufferHandle vbo;
-        TTRendering::MeshHandle vao;
-        TTRendering::RenderPass renderPass {};
+        // TTRendering::MaterialHandle material;
+        // TTRendering::BufferHandle vbo;
+        // TTRendering::MeshHandle mesh;
 
-        Context(TTRendering::RenderingContext* context) : 
+        FonsGLContext(TTRendering::RenderingContext* context) : 
             context(context), 
-            image(context->createImage(64, 64, TTRendering::ImageFormat::R8)) ,
-            material(context->createMaterial(context->fetchShader({context->fetchShaderStage("fontStash.vert.glsl"), context->fetchShaderStage("fontStash.frag.glsl")}))),
-            vbo(context->createBuffer(FONS_VERTEX_COUNT * sizeof(float) * 6, nullptr, TTRendering::BufferMode::StaticDraw)),
-            vao(context->createMesh(FONS_VERTEX_COUNT, vbo, {{TTRendering::MeshAttribute::Dimensions::D2, TTRendering::MeshAttribute::ElementType::F32, 0}, {TTRendering::MeshAttribute::Dimensions::D2, TTRendering::MeshAttribute::ElementType::F32, 1}, {TTRendering::MeshAttribute::Dimensions::D2, TTRendering::MeshAttribute::ElementType::F32, 2}}, nullptr))
+            image(context->createImage(64, 64, TTRendering::ImageFormat::R8))
+            /*material(context->createMaterial(context->fetchShader({context->fetchShaderStage("fontstash.vert.glsl"), context->fetchShaderStage("fontstash.frag.glsl")}))),
+            vbo(context->createBuffer(FONS_VERTEX_COUNT * (sizeof(float) * 4 + sizeof(unsigned char) * 4), nullptr, TTRendering::BufferMode::DynamicDraw)),
+            mesh(context->createMesh(FONS_VERTEX_COUNT, vbo, {
+                {TTRendering::MeshAttribute::Dimensions::D2, TTRendering::MeshAttribute::ElementType::F32, 0}, 
+                {TTRendering::MeshAttribute::Dimensions::D2, TTRendering::MeshAttribute::ElementType::F32, 1}, 
+                {TTRendering::MeshAttribute::Dimensions::D4, TTRendering::MeshAttribute::ElementType::U8 , 2}}, nullptr))*/
         {
         }
 	};
 
 	int _renderCreate(void* userPtr, int width, int height) {
-		Context& context = *((Context*)userPtr);
+		FonsGLContext& context = *((FonsGLContext*)userPtr);
         context.context->resizeImage(context.image, width, height);
-
 		return 1;
 	}
 
 	int _renderResize(void* userPtr, int width, int height) {
-        Context& context = *((Context*)userPtr);
+        FonsGLContext& context = *((FonsGLContext*)userPtr);
         context.context->resizeImage(context.image, width, height);
 		return 1;
 	}
 
 	void _renderUpdate(void* userPtr, int* rect, const unsigned char* data) {
-        Context& context = *((Context*)userPtr);
+        FonsGLContext& context = *((FonsGLContext*)userPtr);
 
 		int w = rect[2] - rect[0];
 		int h = rect[3] - rect[1];
@@ -62,25 +66,38 @@ namespace {
 	}
 
 	void _renderDraw(void* userPtr, const float* verts, const float* tcoords, const unsigned int* colors, int nverts) {
-		Context& context = *((Context*)userPtr);
+        // TODO: not supported (yet?)
+#if 0
+		FonsGLContext& context = *((FonsGLContext*)userPtr);
 		context.material.set("uImage", context.image);
 
         // TODO: Make renderer agnostic somehow
 		glBindBuffer(GL_ARRAY_BUFFER, (GLuint)context.vbo.identifier());
-
 		unsigned char* buf = (unsigned char*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
-        memcpy(buf, (const void*)verts, sizeof(float) * 2 * nverts);
-        buf += sizeof(float) * 2 * FONS_VERTEX_COUNT;
-        memcpy(buf, (const void*)tcoords, sizeof(float) * 2 * nverts);
-        buf += sizeof(float) * 2 * FONS_VERTEX_COUNT;
-        memcpy(buf, (const void*)colors, 4 * nverts);
-
-        // TODO: Make renderer agnostic somehow
+        for(int i = 0; i < nverts; ++i) {
+            *((float*)buf) = verts[i * 2 + 0]; buf += sizeof(float);
+            *((float*)buf) = verts[i * 2 + 1]; buf += sizeof(float);
+            *((float*)buf) = tcoords[i * 2 + 0]; buf += sizeof(float);
+            *((float*)buf) = tcoords[i * 2 + 1]; buf += sizeof(float);
+            *((unsigned int*)buf) = colors[i]; buf += sizeof(unsigned int);
+        }
 		glUnmapBuffer(GL_ARRAY_BUFFER);
 
-        context.renderPass.emptyQueue();
-        context.renderPass.addToDrawQueue(context.vao, context.material, {});
-        context.context->drawPass(context.renderPass);
+        TTRendering::OpenGLContext& glc = *(TTRendering::OpenGLContext*)context.context;
+        GLuint shaderIdentifier = (GLuint)context.material.shader().identifier();
+        glc.bindMaterialResources(glc.useAndPrepareShader(shaderIdentifier), context.material, shaderIdentifier);
+
+        glBindVertexArray((GLuint)context.mesh.identifier());
+
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        glDrawArrays(GL_TRIANGLES, 0, nverts);
+
+        glDisable(GL_BLEND);
+        // glBindBuffer(GL_UNIFORM_BUFFER, pushConstantsUbo);
+        // glBufferData(GL_UNIFORM_BUFFER, sizeof(PushConstants), &pushConstants, GL_DYNAMIC_DRAW);
+#endif
 	}
 
 	void _renderDelete(void* userPtr) {
@@ -89,7 +106,7 @@ namespace {
 }
 
 FONScontext* glfonsCreate(int width, int height, int flags, TTRendering::RenderingContext* renderContext) {
-	Context* context = new Context(renderContext);
+	FonsGLContext* context = new FonsGLContext(renderContext);
 
 	FONSparams params = {
 		.width = width,
@@ -106,9 +123,9 @@ FONScontext* glfonsCreate(int width, int height, int flags, TTRendering::Renderi
 	return fonsCreateInternal(&params);
 }
 
-void glFonsSetResolution(FONScontext* ctx, int width, int height) {
-	((Context*)ctx->params.userPtr)->material.set("uResolution", (float)width, (float)height);
-}
+// void glFonsSetResolution(FONScontext* ctx, int width, int height) {
+	// ((FonsGLContext*)ctx->params.userPtr)->material.set("uResolution", (float)width, (float)height);
+// }
 
 void glfonsDelete(FONScontext* ctx) {
 	fonsDeleteInternal(ctx);
@@ -116,5 +133,10 @@ void glfonsDelete(FONScontext* ctx) {
 
 unsigned int glfonsRGBA(unsigned char r, unsigned char g, unsigned char b, unsigned char a) {
 	return (r) | (g << 8) | (b << 16) | (a << 24);
+}
+
+const TTRendering::ImageHandle& glFonsAtlas(FONScontext* ctx) { 
+    FonsGLContext& context = *(FonsGLContext*)(ctx->params.userPtr);
+    return context.image;
 }
 #endif

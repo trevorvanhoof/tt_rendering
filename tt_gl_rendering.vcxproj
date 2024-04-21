@@ -177,8 +177,8 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="blit.frag.glsl" />
-    <None Include="default.vert.glsl" />
     <None Include="fontstash.frag.glsl" />
+    <None Include="fontstash.geom.glsl" />
     <None Include="fontstash.vert.glsl" />
     <None Include="gl\tt_gl_defs.inc" />
     <None Include="gl\tt_gl_defs_dbg.inc" />

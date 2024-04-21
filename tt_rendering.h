@@ -5,6 +5,7 @@
 
 #include <vector>
 #include <unordered_map>
+#include <map>
 #include <string>
 
 #define BEFRIEND_CONTEXTS friend class RenderingContext; friend class OpenGLContext; friend class VkContext;
@@ -464,41 +465,59 @@ namespace TTRendering {
 		TT::Mat44 extraData = TT::MAT44_IDENTITY;
 	};
 
+    struct RenderEntry {
+        size_t shaderQueueIndex;
+        size_t materialQueueIndex;
+        size_t meshLayoutQueueIndex;
+        size_t meshIndex;
+        PushConstants* pushConstants = nullptr;
+    };
+
+    namespace {
+        struct DrawInfo {
+            size_t meshIdentifier;
+            PushConstants pushConstants;
+            size_t instanceCount;
+        };
+
+        struct MeshQueue {
+            size_t next = 0;
+            std::map<size_t, DrawInfo> queue = {};
+            auto begin() const { return queue.begin();}
+            auto end() const { return queue.end();}
+        };
+
+        struct MaterialQueue {
+            std::unordered_map<size_t, size_t> materialIdentifierToQueueIndex;
+
+            std::vector<MaterialHandle> keys;
+            std::vector<MeshQueue> queues;
+
+            MeshQueue& fetch(const MaterialHandle& key, size_t& index);
+        };
+
+        struct ShaderQueue {
+
+            std::unordered_map<size_t, size_t> shaderIdentifierToQueueIndex;
+            std::vector<size_t> keys;
+            std::vector<MaterialQueue> queues;
+
+            MaterialQueue& fetch(size_t key, size_t& index);
+        };
+
+        struct DrawQueue {
+            std::unordered_map<size_t, size_t> meshLayoutHashToQueueIndex;
+            std::vector<size_t> keys;
+            std::vector<ShaderQueue> queues;
+
+            ShaderQueue& fetch(size_t key, size_t& index);
+        };
+    }
+
 	class RenderPass {
 		BEFRIEND_CONTEXTS;
 
 		bool modified = true;
-
-		struct DrawInfo {
-			size_t meshIdentifier;
-			PushConstants pushConstants;
-            size_t instanceCount;
-		};
-
-		struct DrawQueue {
-			struct ShaderQueue {
-				struct MaterialQueue {
-					std::unordered_map<size_t, size_t> materialIdentifierToQueueIndex;
-
-					std::vector<MaterialHandle> keys;
-					std::vector<std::vector<DrawInfo>> queues;
-
-					std::vector<RenderPass::DrawInfo>& fetch(const MaterialHandle& key);
-				};
-
-				std::unordered_map<size_t, size_t> shaderIdentifierToQueueIndex;
-				std::vector<size_t> keys;
-				std::vector<MaterialQueue> queues;
-
-				MaterialQueue& fetch(size_t key);
-			};
-
-			std::unordered_map<size_t, size_t> meshLayoutHashToQueueIndex;
-			std::vector<size_t> keys;
-			std::vector<ShaderQueue> queues;
-
-			ShaderQueue& fetch(size_t key);
-		};
 
 		DrawQueue drawQueue;
 
@@ -515,7 +534,8 @@ namespace TTRendering {
 		TT::Vec4 clearColor;
 		float clearDepthValue = 1.0f;
 
-		PushConstants* addToDrawQueue(const MeshHandle& mesh, const MaterialHandle& material, const PushConstants& pushConstants, size_t instanceCount = 0);
+        RenderEntry addToDrawQueue(const MeshHandle& mesh, const MaterialHandle& material, const PushConstants& pushConstants, size_t instanceCount = 0);
+        void removeFromDrawQueue(const RenderEntry& entry);
 		void emptyQueue();
 	};
 
@@ -578,8 +598,9 @@ namespace TTRendering {
 		virtual ImageHandle createImage(unsigned int width, unsigned int height, ImageFormat format, ImageInterpolation interpolation = ImageInterpolation::Linear, ImageTiling tiling = ImageTiling::Repeat, const unsigned char* data = nullptr) = 0;
 		NullableHandle<ImageHandle> loadImage(const char* filePath, ImageInterpolation interpolation = ImageInterpolation::Linear, ImageTiling tiling = ImageTiling::Repeat);
 		virtual void imageSize(const ImageHandle& image, unsigned int& width, unsigned int& height) const = 0;
+		virtual void framebufferSize(const FramebufferHandle& framebuffer, unsigned int& width, unsigned int& height) const = 0;
 		virtual void resizeImage(const ImageHandle& image, unsigned int width, unsigned int height) = 0;
-		virtual void resizeFbo(const FramebufferHandle& image, unsigned int width, unsigned int height) = 0;
+        virtual void resizeFramebuffer(const FramebufferHandle& framebuffer, unsigned int width, unsigned int height) = 0;
 		virtual FramebufferHandle createFramebuffer(const std::vector<ImageHandle>& colorAttachments, ImageHandle* depthStencilAttachment = nullptr) = 0;
         virtual void dispatchCompute(const MaterialHandle& material, unsigned int x, unsigned int y, unsigned int z) = 0;
 	};
