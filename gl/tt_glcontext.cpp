@@ -292,7 +292,7 @@ namespace TTRendering {
 	OpenGLContext::OpenGLContext(const TT::Window& window) {
 		_windowsGLContext = TTRendering::createGLContext(window);
         TTRendering::loadGLFunctions();
-        glEnable(GL_DEPTH_TEST);
+        glEnable(GL_DEPTH_TEST); TT_GL_DBG_ERR;
 		glGenBuffers(1, &passUbo);
 		glGenBuffers(1, &materialUbo);
 		glGenBuffers(1, &pushConstantsUbo);
@@ -443,7 +443,7 @@ namespace TTRendering {
 		glFormatInfo(format, internalFormat, channels, elementType); TT_GL_DBG_ERR;
 		glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, width, height, 0, channels, elementType, data); TT_GL_DBG_ERR;
 		glBindTexture(GL_TEXTURE_2D, 0); TT_GL_DBG_ERR;
-		return ImageHandle(glHandle, /*width, height,*/ format, interpolation, tiling);
+		return ImageHandle(glHandle, format, interpolation, tiling);
 	}
 
     void OpenGLContext::imageSize(const ImageHandle& image, unsigned int& width, unsigned int& height) const {
@@ -555,34 +555,36 @@ namespace TTRendering {
         switch (blendMode) {
         case TTRendering::MaterialBlendMode::Opaque:
         case TTRendering::MaterialBlendMode::AlphaTest:
-            glDisable(GL_BLEND);
-            glDepthMask(true);
+            glDisable(GL_BLEND); TT_GL_DBG_ERR;
+            glDepthMask(true); TT_GL_DBG_ERR;
             // glBlendFunc(GL_ONE, GL_ZERO);
             break;
         case TTRendering::MaterialBlendMode::Alpha:
-            glEnable(GL_BLEND);
-            glDepthMask(false);
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glEnable(GL_BLEND); TT_GL_DBG_ERR;
+            glDepthMask(false); TT_GL_DBG_ERR;
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); TT_GL_DBG_ERR;
             break;
         case TTRendering::MaterialBlendMode::PremultipliedAlpha:
-            glEnable(GL_BLEND);
-            glDepthMask(false);
-            glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+            glEnable(GL_BLEND); TT_GL_DBG_ERR;
+            glDepthMask(false); TT_GL_DBG_ERR;
+            glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA); TT_GL_DBG_ERR;
             break;
         case TTRendering::MaterialBlendMode::Additive:
-            glEnable(GL_BLEND);
-            glDepthMask(false);
-            glBlendFunc(GL_ONE, GL_ONE);
+            glEnable(GL_BLEND); TT_GL_DBG_ERR;
+            glDepthMask(false); TT_GL_DBG_ERR;
+            glBlendFunc(GL_ONE, GL_ONE); TT_GL_DBG_ERR;
             break;
         default:
             TT::assertFatal(false);
         }
     }
 
-    void OpenGLContext::bindMaterialUBO(const UniformInfo* uniformInfo, const MaterialHandle& material) const {
+    void OpenGLContext::uploadMaterial(const UniformInfo* uniformInfo, const MaterialHandle& material) const {
         if (uniformInfo) {
-            TT::assert(material._uniformBuffer != nullptr);
             // Copy the data into the buffer
+            glBindBuffer(GL_UNIFORM_BUFFER, materialUbo);
+            TT::assert(material._uniformBuffer != nullptr);
+            TT::assert(uniformInfo->bufferSize <= materialUboSize);
             glBufferSubData(GL_UNIFORM_BUFFER, 0, uniformInfo->bufferSize, material._uniformBuffer);
             // Map only the used portion of the buffer
             glBindBufferRange(GL_UNIFORM_BUFFER, (GLuint)UniformBlockSemantics::Material, materialUbo, 0, uniformInfo->bufferSize);
@@ -593,21 +595,22 @@ namespace TTRendering {
         unsigned int activeImage = 0;
         for(const auto& pair : material._images) {
             glActiveTexture(GL_TEXTURE0 + activeImage);
-            glBindTexture(GL_TEXTURE_2D, (GLuint)material._images.handle(pair.second).identifier());
-            glUniform1i(glGetUniformLocation((GLuint)shaderIdentifier, pair.first.data()), activeImage);
+            glBindTexture(GL_TEXTURE_2D, (GLuint)material._images.handle(pair.second).identifier()); TT_GL_DBG_ERR;
+            GLint loc = glGetUniformLocation((GLuint)shaderIdentifier, pair.first.data());
+            glUniform1i(loc, activeImage);
             ++activeImage;
         }
     }
 
     void OpenGLContext::bindMaterialSSBOs(const MaterialHandle& material, size_t shaderIdentifier) const {
         for(const auto& pair : material._ssbos) {
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, (GLuint)material._ssbos.handle(pair.second).identifier());
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, pair.first, (GLuint)material._ssbos.handle(pair.second).identifier());
         }
     }
 
     void OpenGLContext::bindMaterialResources(const UniformInfo* uniformInfo, const MaterialHandle& material, size_t shaderIdentifier) const {
         applyMaterialBlendMode(material);
-        bindMaterialUBO(uniformInfo, material);
+        uploadMaterial(uniformInfo, material);
         bindMaterialImages(material, shaderIdentifier);
         bindMaterialSSBOs(material, shaderIdentifier);
     }
@@ -642,7 +645,7 @@ namespace TTRendering {
             glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)pass.framebuffer->identifier());
             unsigned int width, height;
             framebufferSize(*pass.framebuffer, width, height);
-            glViewport(0, 0, width, height);
+            glViewport(0, 0, width, height); TT_GL_DBG_ERR;
         }
 
 		GLenum clearFlags = 0;
@@ -678,18 +681,39 @@ namespace TTRendering {
 				for (size_t materialIndex = 0; materialIndex < materialQueue.keys.size(); ++materialIndex) {
 					const MaterialHandle& material = materialQueue.keys[shaderIndex];
 
+                    glBindBuffer(GL_UNIFORM_BUFFER, materialUbo);
                     bindMaterialResources(uniformInfo, material, shaderIdentifier);
+                    glBindBuffer(GL_UNIFORM_BUFFER, pushConstantsUbo);
 
 					const auto& meshQueue = materialQueue.queues[shaderIndex];
 					for (const auto& pair : meshQueue) {
-                        const auto& [meshIdentifier, pushConstants, instanceCount] = pair.second;
+                        const auto& [meshIdentifier, instanceCount, pushConstants] = pair.second;
 						const MeshHandle* meshH = meshes.find(meshIdentifier);
 						TT::assertFatal(meshH != nullptr);
 						const MeshHandle& mesh = *meshH;
 						glBindVertexArray((GLuint)mesh.identifier());
 
-						glBindBuffer(GL_UNIFORM_BUFFER, pushConstantsUbo);
-						glBufferData(GL_UNIFORM_BUFFER, sizeof(PushConstants), &pushConstants, GL_DYNAMIC_DRAW);
+#if 0
+#error
+                        // aggressively rebind everything didn't fix the missing objects or crash
+                        if (!pass.passUniforms.isEmpty()) {
+                            glBindBuffer(GL_UNIFORM_BUFFER, passUbo);
+                            size_t requiredBufferSize = pass.passUniforms.value()->size();
+                            if (passUboSize < requiredBufferSize) {
+                                glBufferData(GL_UNIFORM_BUFFER, requiredBufferSize, nullptr, GL_DYNAMIC_DRAW);
+                                passUboSize = requiredBufferSize;
+                            }
+                            glBufferSubData(GL_UNIFORM_BUFFER, 0, requiredBufferSize, pass.passUniforms.value()->cpuBuffer());
+                            glBindBufferRange(GL_UNIFORM_BUFFER, (GLuint)UniformBlockSemantics::Pass, passUbo, 0, requiredBufferSize);
+                        }
+
+                        bindMaterialResources(useAndPrepareShader((GLuint)shaderIdentifier), material, shaderIdentifier);
+
+                        glBindBuffer(GL_UNIFORM_BUFFER, pushConstantsUbo);
+                        glBindBufferRange(GL_UNIFORM_BUFFER, (GLuint)UniformBlockSemantics::PushConstants, pushConstantsUbo, 0, sizeof(PushConstants));
+#endif
+
+						glBufferData(GL_UNIFORM_BUFFER, sizeof(PushConstants), pushConstants, GL_DYNAMIC_DRAW);
 
 						if (mesh.indexBuffer() != nullptr) {
                             if(instanceCount > 0) {

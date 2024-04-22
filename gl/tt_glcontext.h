@@ -13,7 +13,7 @@ namespace TTRendering {
         const UniformInfo* materialUniformInfo(size_t shaderIdentifier) const;
         void bindAndAllocateMaterialUBO(const UniformInfo* uniformInfo) const;
         void applyMaterialBlendMode(const MaterialHandle& material) const;
-        void bindMaterialUBO(const UniformInfo* uniformInfo, const MaterialHandle& material) const;
+        void uploadMaterial(const UniformInfo* uniformInfo, const MaterialHandle& material) const;
         void bindMaterialImages(const MaterialHandle& material, size_t shaderIdentifier) const;
         void bindMaterialSSBOs(const MaterialHandle& material, size_t shaderIdentifier) const;
 
