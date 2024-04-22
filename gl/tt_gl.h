@@ -13,10 +13,12 @@ namespace TTRendering {
     HDC getGLContext(const TT::Window& window);
 }
 
+#define TT_GL_DBG
+
 #ifndef TT_GLEXT_IMPLEMENTATION
 #ifdef TT_GL_DBG
 #include "tt_gl_defs_dbg.inc"
-#define TT_GL_DBG_ERR TT::checkGLErrors();
+#define TT_GL_DBG_ERR TTRendering::checkGLErrors();
 #else
 #include "tt_gl_defs.inc"
 #define TT_GL_DBG_ERR
