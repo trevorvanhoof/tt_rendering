@@ -681,8 +681,8 @@ namespace TTRendering {
 				for (size_t materialIndex = 0; materialIndex < materialQueue.keys.size(); ++materialIndex) {
 					const MaterialHandle& material = materialQueue.keys[shaderIndex];
 
-                    glBindBuffer(GL_UNIFORM_BUFFER, materialUbo);
                     bindMaterialResources(uniformInfo, material, shaderIdentifier);
+
                     glBindBuffer(GL_UNIFORM_BUFFER, pushConstantsUbo);
 
 					const auto& meshQueue = materialQueue.queues[shaderIndex];
@@ -692,26 +692,6 @@ namespace TTRendering {
 						TT::assertFatal(meshH != nullptr);
 						const MeshHandle& mesh = *meshH;
 						glBindVertexArray((GLuint)mesh.identifier());
-
-#if 0
-#error
-                        // aggressively rebind everything didn't fix the missing objects or crash
-                        if (!pass.passUniforms.isEmpty()) {
-                            glBindBuffer(GL_UNIFORM_BUFFER, passUbo);
-                            size_t requiredBufferSize = pass.passUniforms.value()->size();
-                            if (passUboSize < requiredBufferSize) {
-                                glBufferData(GL_UNIFORM_BUFFER, requiredBufferSize, nullptr, GL_DYNAMIC_DRAW);
-                                passUboSize = requiredBufferSize;
-                            }
-                            glBufferSubData(GL_UNIFORM_BUFFER, 0, requiredBufferSize, pass.passUniforms.value()->cpuBuffer());
-                            glBindBufferRange(GL_UNIFORM_BUFFER, (GLuint)UniformBlockSemantics::Pass, passUbo, 0, requiredBufferSize);
-                        }
-
-                        bindMaterialResources(useAndPrepareShader((GLuint)shaderIdentifier), material, shaderIdentifier);
-
-                        glBindBuffer(GL_UNIFORM_BUFFER, pushConstantsUbo);
-                        glBindBufferRange(GL_UNIFORM_BUFFER, (GLuint)UniformBlockSemantics::PushConstants, pushConstantsUbo, 0, sizeof(PushConstants));
-#endif
 
 						glBufferData(GL_UNIFORM_BUFFER, sizeof(PushConstants), pushConstants, GL_DYNAMIC_DRAW);
 
