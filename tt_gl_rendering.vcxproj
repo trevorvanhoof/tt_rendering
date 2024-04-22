@@ -133,15 +133,6 @@
   <ItemGroup>
     <ClCompile Include="gl\tt_gl.cpp" />
     <ClCompile Include="gl\tt_glcontext.cpp" />
-    <ClCompile Include="gl\tt_gl_handles.cpp">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-    </ClCompile>
-    <ClCompile Include="gl\tt_program_manager.cpp">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-    </ClCompile>
-    <ClCompile Include="gl\tt_render_concepts.cpp">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-    </ClCompile>
     <ClCompile Include="test_app.cpp" />
     <ClCompile Include="ThirdParty\fontstash\fontstash.cpp" />
     <ClCompile Include="ThirdParty\stb\stb_image.cpp" />
@@ -155,16 +146,7 @@
   <ItemGroup>
     <ClInclude Include="gl\tt_gl.h" />
     <ClInclude Include="gl\tt_glcontext.h" />
-    <ClInclude Include="gl\tt_gl_handles.h">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-    </ClInclude>
     <ClInclude Include="gl\tt_gl_rendering_fontstash.h" />
-    <ClInclude Include="gl\tt_program_manager.h">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-    </ClInclude>
-    <ClInclude Include="gl\tt_render_concepts.h">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-    </ClInclude>
     <ClInclude Include="ThirdParty\fontstash\fontstash.h" />
     <ClInclude Include="ThirdParty\fontstash\gl3corefontstash.h" />
     <ClInclude Include="ThirdParty\fontstash\gl46corefontstash.h" />
@@ -191,6 +173,8 @@
     <None Include="noop.vert.glsl" />
     <None Include="particles.compute.glsl" />
     <None Include="particles_tick.compute.glsl" />
+    <None Include="rookworsttunnel.frag.glsl" />
+    <None Include="rookworsttunnel.vert.glsl" />
     <None Include="ThirdParty\fontstash\README.md" />
   </ItemGroup>
   <ItemGroup>

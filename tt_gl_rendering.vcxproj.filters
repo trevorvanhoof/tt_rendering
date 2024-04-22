@@ -54,20 +54,11 @@
     <ClCompile Include="gl\tt_gl.cpp">
       <Filter>Source Files\gl</Filter>
     </ClCompile>
-    <ClCompile Include="gl\tt_gl_handles.cpp">
-      <Filter>Source Files\gl</Filter>
-    </ClCompile>
     <ClCompile Include="ThirdParty\stb\stb_image.cpp">
       <Filter>Source Files\ThirdParty\stb</Filter>
     </ClCompile>
     <ClCompile Include="ThirdParty\fontstash\fontstash.cpp">
       <Filter>Source Files\ThirdParty\fontstash</Filter>
-    </ClCompile>
-    <ClCompile Include="gl\tt_program_manager.cpp">
-      <Filter>Source Files\gl</Filter>
-    </ClCompile>
-    <ClCompile Include="gl\tt_render_concepts.cpp">
-      <Filter>Source Files\gl</Filter>
     </ClCompile>
     <ClCompile Include="gl\tt_glcontext.cpp">
       <Filter>Source Files\gl</Filter>
@@ -77,15 +68,6 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="gl\tt_gl_handles.h">
-      <Filter>Header Files\gl</Filter>
-    </ClInclude>
-    <ClInclude Include="gl\tt_program_manager.h">
-      <Filter>Header Files\gl</Filter>
-    </ClInclude>
-    <ClInclude Include="gl\tt_render_concepts.h">
-      <Filter>Header Files\gl</Filter>
-    </ClInclude>
     <ClInclude Include="gl\tt_gl.h">
       <Filter>Header Files\gl</Filter>
     </ClInclude>
@@ -170,6 +152,12 @@
       <Filter>Resource Files</Filter>
     </None>
     <None Include="fontstash.geom.glsl">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="rookworsttunnel.vert.glsl">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="rookworsttunnel.frag.glsl">
       <Filter>Resource Files</Filter>
     </None>
   </ItemGroup>

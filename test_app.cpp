@@ -1,3 +1,5 @@
+// #define ORBIT_CAMERA
+
 #include <windont.h>
 #include <tt_window.h>
 #include <tt_files.h>
@@ -70,6 +72,7 @@ enum class ComponentType {
     Sprite,
     ExampleParticle,
     ExampleFont,
+    RookworstTunnel,
 };
 
 #define DECL_COMPONENT_TYPE(LABEL, IS_SINGLE_USE) static const ComponentType componentType = ComponentType::LABEL; virtual ComponentType type() const override; static const bool isSingleUse = IS_SINGLE_USE;
@@ -475,6 +478,44 @@ public:
 
 IMPL_COMPONENT_TYPE(ExampleFont);
 
+class RookworstTunnel : public Component {
+protected:
+    using Component::Component;
+
+    TTRendering::PushConstants pushConstants;
+    Transform* transform = nullptr;
+
+public:
+    DECL_COMPONENT_TYPE(RookworstTunnel, true);
+
+    TTRendering::NullableHandle<TTRendering::ImageHandle> image = nullptr;
+    TTRendering::NullableHandle<TTRendering::MaterialHandle> material = nullptr;
+
+    void initRenderingResources(TickContext& context) override {
+        if (!image)
+            return;
+
+        material = context.render->createMaterial(context.render->fetchShader({
+            context.render->fetchShaderStage("rookworsttunnel.vert.glsl"),
+            context.render->fetchShaderStage("rookworsttunnel.frag.glsl"),
+            }), TTRendering::MaterialBlendMode::AlphaTest);
+        material->set("uImage", *image);
+        context.scene->renderPass.addToDrawQueue(context.resources.meshes["quadMesh"], *material, &pushConstants, 1000);
+
+        transform = entity.component<Transform>();
+    }
+
+    void tick(TickContext& context) override {
+        if (transform)
+            pushConstants.modelMatrix = transform->worldMatrix();
+        if(material)
+            material->set("uSeconds", (float)context.runtime);
+
+    }
+};
+
+IMPL_COMPONENT_TYPE(RookworstTunnel);
+
 const int SCREEN_WIDTH = 1920;
 const int SCREEN_HEIGHT = 1080;
 const int PIXEL_SIZE = 1;
@@ -495,8 +536,9 @@ public:
     }
 
     ~App() {
-        for (Entity* entity : tickContext.scene->entities)
-            delete entity;
+        for(SimpleScene& scene : scenes)
+            for (Entity* entity : scene.entities)
+                delete entity;
     }
 
     void tick(double runtime, double deltaTime) {
@@ -504,12 +546,19 @@ public:
         tickContext.deltaTime = deltaTime;
 
         // Switch scenes
-        tickContext.scene = &particleScene;
-        tickContext.scene = &tunnelScene;
+        if(tickContext.keyStates['1'] == EKeyState::Press)
+            tickContext.scene = &scenes[0];
+        if (tickContext.keyStates['2'] == EKeyState::Press)
+            tickContext.scene = &scenes[1];
 
         // Update active scene
-        for (Entity* entity : tickContext.scene->entities)
-            entity->tick(tickContext);
+        if(tickContext.scene)
+            for (Entity* entity : tickContext.scene->entities)
+                entity->tick(tickContext);
+
+#ifndef ORBIT_CAMERA
+        tickCamera(deltaTime);
+#endif
 
         dropKeystates();
     }
@@ -539,7 +588,9 @@ private:
             tickContext.resources.shaders.insert("instancedImageShader", context.fetchShader({context.fetchShaderStage("image_instanced.vert.glsl"),context.fetchShaderStage("image_instanced.frag.glsl")}));
 
             // Get the pass uniforms from the first shader we load because I don't support arbitrary UBO definitions yet.
-            forwardPassUniforms = context.createUniformBuffer(tickContext.resources.shaders["imageShader"], TTRendering::UniformBlockSemantics::Pass);
+            // auto shader = tickContext.resources.shaders["imageShader"];
+            auto shader = context.fetchShader({ context.fetchShaderStage("rookworsttunnel.vert.glsl"), context.fetchShaderStage("rookworsttunnel.frag.glsl") });
+            forwardPassUniforms = context.createUniformBuffer(shader, TTRendering::UniformBlockSemantics::Pass);
         }
 
         // Quad
@@ -578,19 +629,18 @@ private:
             entity->initRenderingResources(tickContext);
     }
     
-    SimpleScene particleScene;
-    void initParticleScene() {
-        particleScene.renderPass.clearColor = { 0.1f, 0.2f, 0.3f, 1.0f };
-        particleScene.renderPass.setFramebuffer(tickContext.resources.framebuffers["fbo"]);
+    static void initParticleScene(const TickContext& tickContext, SimpleScene& scene) {
+        scene.renderPass.clearColor = { 0.1f, 0.2f, 0.3f, 1.0f };
+        scene.renderPass.setFramebuffer(tickContext.resources.framebuffers["fbo"]);
 
         {
             // Spawn an entity with a sprite to use
             Entity* e = new Entity;
-            particleScene.entities.push_back(e);
+            scene.entities.push_back(e);
 
             auto frikandel = tickContext.resources.images["frikandel"];
             unsigned int w, h;
-            context.imageSize(frikandel, w, h);
+            tickContext.render->imageSize(frikandel, w, h);
 
             e->addComponent<Transform>()->setScale({ (float)w, (float)h, 1.0f });
             e->component<Transform>()->setTranslate({ (float)w * -0.5f, (float)h * -0.5f, 0.0f });
@@ -600,7 +650,7 @@ private:
         {
             // Spawn the particles
             Entity* e = new Entity;
-            particleScene.entities.push_back(e);
+            scene.entities.push_back(e);
             e->addComponent<Transform>();
             e->addComponent<ExampleParticle>();
         }
@@ -608,40 +658,41 @@ private:
         {
             // Spawn example font
             Entity* e = new Entity;
-            particleScene.entities.push_back(e);
+            scene.entities.push_back(e);
             e->addComponent<Transform>();
             e->addComponent<ExampleFont>();
         }
-
-        finalizeScene(particleScene);
     }
 
-    SimpleScene tunnelScene;
-    void initTunnelScene() {
-        tunnelScene.renderPass.clearColor = { 0.1f, 0.2f, 0.3f, 1.0f };
-        tunnelScene.renderPass.setFramebuffer(tickContext.resources.framebuffers["fbo"]);
+    static void initTunnelScene(const TickContext& tickContext, SimpleScene& scene) {
+        scene.renderPass.clearColor = { 0.1f, 0.2f, 0.3f, 1.0f };
+        scene.renderPass.setFramebuffer(tickContext.resources.framebuffers["fbo"]);
 
         {
             // Spawn an entity with a sprite to use
             Entity* e = new Entity;
-            tunnelScene.entities.push_back(e);
+            scene.entities.push_back(e);
 
             unsigned int w, h;
             auto rookworst = tickContext.resources.images["rookworst"];
-            context.imageSize(rookworst, w, h);
+            tickContext.render->imageSize(rookworst, w, h);
 
             e->addComponent<Transform>()->setScale({ (float)w, (float)h, 1.0f });
             e->component<Transform>()->setTranslate({ (float)w * -0.5f, (float)h * -0.5f, 0.0f });
-            e->addComponent<Sprite>()->image = rookworst;
+            e->addComponent<RookworstTunnel>()->image = rookworst;
         }
-
-        finalizeScene(tunnelScene);
     }
+
+    std::vector<SimpleScene> scenes;
 
     void initRenderingResources() {
         initSharedResources(); // <- must fill out forwardPassUniforms!
-        initParticleScene(); // <- must each call finalizeScene on the respective scene at the end
-        initTunnelScene();
+        
+        initParticleScene(tickContext, scenes.emplace_back());
+        initTunnelScene(tickContext, scenes.emplace_back());
+
+        for(SimpleScene& scene : scenes)
+            finalizeScene(scene);
     }
 
     void onResizeEvent(const TT::ResizeEvent& event) override {
@@ -659,13 +710,25 @@ private:
     void onPaintEvent(const TT::PaintEvent& event) override {
         // Apply the view projection matrices
         // TT::Mat44 viewProjectionMatrix = TT::Mat44::orthoSymmetric(tickContext.resolution.x / PIXEL_SIZE, tickContext.resolution.y / PIXEL_SIZE, -1000.0f, 1000.0f);
+        // TT::Mat44 uP = TT::Mat44::perspectiveY(1.0, tickContext.resolution.x / tickContext.resolution.y, 0.1f, 10000.0f); // zoom * 0.1f, zoom * 10.0f);
+
+#ifdef ORBIT_CAMERA
         TT::Mat44 uP = TT::Mat44::perspectiveY(1.0, tickContext.resolution.x / tickContext.resolution.y, zoom * 0.1f, zoom * 10.0f);
-        TT::Mat44 uV = TT::Mat44::rotate(tilt, orbit, 0.0f, TT::ERotateOrder::YXZ) * TT::Mat44::translate(0.0f, 0.0f, -zoom);
-        uV = TT::Mat44::translate(origin) * uV;
+        TT::Mat44 uV = TT::Mat44::translate(origin) * TT::Mat44::rotate(tilt, orbit, 0.0f, TT::ERotateOrder::YXZ) * TT::Mat44::translate(0.0f, 0.0f, -zoom);
+#else
+        TT::Mat44 uP = TT::Mat44::perspectiveY(1.0, tickContext.resolution.x / tickContext.resolution.y, cameraNearClip, cameraFarClip);
+        TT::Mat44 uV = TT::Mat44::translate(cameraPosition) * TT::Mat44::rotate(cameraRadians, TT::ERotateOrder::YXZ);
+#endif
+        
+        TT::Mat44 uC = uV.inversed();
+        // TT::Mat44 uC = TT::Mat44::translate(0.0f, 0.0f, -zoom) * TT::Mat44::rotate(-tilt, -orbit, 0.0f, TT::ERotateOrder::ZXY) * TT::Mat44::translate(origin);
+
         forwardPassUniforms.set("uVP", uV * uP);
+        forwardPassUniforms.setVec3("uCameraPos", uC.col[3].m128_f32);
 
         context.beginFrame();
-        context.drawPass(tickContext.scene->renderPass);
+        if(tickContext.scene)
+            context.drawPass(tickContext.scene->renderPass);
         context.drawPass(presentPass);
         context.endFrame();
     }
@@ -687,14 +750,16 @@ private:
         }
     }
 
-    TT::Vec3 origin = {};
-    float orbit = 0.0f;
-    float tilt = 0.0f;
-    float zoom = 1000.0f;
     float dragStartOrbit = 0.0f;
     float dragStartTilt = 0.0f;
     int dragStartX = 0;
     int dragStartY = 0;
+
+#ifdef ORBIT_CAMERA
+    TT::Vec3 origin = {};
+    float orbit = 0.0f;
+    float tilt = 0.0f;
+    float zoom = 1000.0f;
     bool dragPanAction = false;
     TT::Vec3 dragStartOrigin = {};
     TT::Mat44 dragPanSpace = {};
@@ -729,6 +794,68 @@ private:
     void onWheelEvent(const TT::WheelEvent& event) override {
         zoom *= powf(1.0001f, -event.delta * 4.0f);
     }
+#else
+    TT::Vec3 cameraPosition = {};
+    TT::Vec3 cameraRadians = {};
+    float cameraNearClip = 0.1f;
+    float cameraFarClip = 10000.0f;
+
+    void tickCamera(double deltaTime) {
+        TT::Mat44 uCr = TT::Mat44::rotate(-cameraRadians, TT::ERotateOrder::ZXY);
+
+        TT::Vec3 delta = {};
+        if (tickContext.keyStates['A'] != EKeyState::Up)
+            delta -= TT::Vec3(uCr.col[0]);
+        if (tickContext.keyStates['D'] != EKeyState::Up)
+            delta += TT::Vec3(uCr.col[0]);
+        if (tickContext.keyStates['E'] != EKeyState::Up)
+            delta -= TT::Vec3(uCr.col[1]);
+        if (tickContext.keyStates['Q'] != EKeyState::Up)
+            delta += TT::Vec3(uCr.col[1]);
+        if (tickContext.keyStates['W'] != EKeyState::Up)
+            delta -= TT::Vec3(uCr.col[2]);
+        if (tickContext.keyStates['S'] != EKeyState::Up)
+            delta += TT::Vec3(uCr.col[2]);
+        
+        float speed = 100.0f;
+        if (tickContext.keyStates[VK_SHIFT] != EKeyState::Up)
+            speed = 1000.0f;
+        if (tickContext.keyStates[VK_CONTROL] != EKeyState::Up)
+            speed = 10.0f;
+
+        cameraPosition += delta * (float)deltaTime * -speed;
+
+        float dx = 0.0f;
+        float dy = 0.0f;
+        if (tickContext.keyStates[VK_LEFT] != EKeyState::Up)
+            dx -= 1.0f;
+        if (tickContext.keyStates[VK_RIGHT] != EKeyState::Up)
+            dx += 1.0f;
+        if (tickContext.keyStates[VK_UP] != EKeyState::Up)
+            dy -= 1.0f;
+        if (tickContext.keyStates[VK_DOWN] != EKeyState::Up)
+            dy += 1.0f;
+        cameraRadians.y += dx * (float)deltaTime;
+        cameraRadians.x += dy * (float)deltaTime;
+
+    }
+
+    void onMouseEvent(const TT::MouseEvent& event) override {
+        if (event.type == TT::Event::EType::MouseDown) {
+            dragStartOrbit = cameraRadians.y;
+            dragStartTilt = cameraRadians.x;
+            dragStartX = event.x;
+            dragStartY = event.y;
+        }
+
+        if (event.type == TT::Event::EType::MouseMove) {
+            float dx = (event.x - dragStartX) * 0.001f;
+            float dy = (event.y - dragStartY) * 0.001f;
+            cameraRadians.y = dragStartOrbit + dx;
+            cameraRadians.x = dragStartTilt + dy;
+        }
+    }
+#endif
 };
 
 int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPSTR lpCmdLine, _In_ int nShowCmd) {
