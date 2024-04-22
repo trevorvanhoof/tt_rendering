@@ -9,5 +9,4 @@ layout(location = 0) out vec4 cd0;
 
 void main() {
 	cd0 = vec4(vColor.xyz, vColor.w * texture(uImage, vUv).x);
-	// if(cd0.w < 0.5) discard;
 }
