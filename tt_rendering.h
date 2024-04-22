@@ -470,21 +470,20 @@ namespace TTRendering {
         size_t materialQueueIndex;
         size_t meshLayoutQueueIndex;
         size_t meshIndex;
-        PushConstants* pushConstants = nullptr;
     };
 
     namespace {
         struct DrawInfo {
-            size_t meshIdentifier;
-            PushConstants pushConstants;
-            size_t instanceCount;
+            size_t meshIdentifier = 0;
+            size_t instanceCount = 0;
+            const PushConstants* pushConstants = nullptr;
         };
 
         struct MeshQueue {
             size_t next = 0;
-            std::map<size_t, DrawInfo> queue = {};
-            auto begin() const { return queue.begin();}
-            auto end() const { return queue.end();}
+            std::map<size_t, DrawInfo> orderedQueue = {};
+            auto begin() const { return orderedQueue.begin();}
+            auto end() const { return orderedQueue.end();}
         };
 
         struct MaterialQueue {
@@ -534,7 +533,7 @@ namespace TTRendering {
 		TT::Vec4 clearColor;
 		float clearDepthValue = 1.0f;
 
-        RenderEntry addToDrawQueue(const MeshHandle& mesh, const MaterialHandle& material, const PushConstants& pushConstants, size_t instanceCount = 0);
+        RenderEntry addToDrawQueue(const MeshHandle& mesh, const MaterialHandle& material, const PushConstants* pushConstants = nullptr, size_t instanceCount = 0);
         void removeFromDrawQueue(const RenderEntry& entry);
 		void emptyQueue();
 	};

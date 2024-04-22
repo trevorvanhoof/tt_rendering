@@ -277,21 +277,23 @@ namespace TTRendering {
 		modified = true;
 	}
 
-    RenderEntry RenderPass::addToDrawQueue(const MeshHandle& mesh, const MaterialHandle& material, const PushConstants& pushConstants, size_t instanceCount) {
+    RenderEntry RenderPass::addToDrawQueue(const MeshHandle& mesh, const MaterialHandle& material, const PushConstants* pushConstants, size_t instanceCount) {
         RenderEntry result;
         auto& queue = drawQueue
             .fetch(mesh._meshLayoutHash, result.meshLayoutQueueIndex)
             .fetch(material._shader.identifier(), result.shaderQueueIndex)
             .fetch(material, result.materialQueueIndex);
         result.meshIndex = queue.next++;
-        queue.queue[result.meshIndex] = DrawInfo(mesh.identifier(), pushConstants, instanceCount);
-        result.pushConstants = &queue.queue[result.meshIndex].pushConstants;
+        DrawInfo& e = queue.orderedQueue[result.meshIndex];
+        e.meshIdentifier = mesh.identifier();
+        e.instanceCount = instanceCount;
+        e.pushConstants = pushConstants;
         modified = true;
         return result;
     }
 
     void RenderPass::removeFromDrawQueue(const RenderEntry& entry) {
-        drawQueue.queues[entry.meshLayoutQueueIndex].queues[entry.shaderQueueIndex].queues[entry.materialQueueIndex].queue.erase(entry.meshIndex);
+        drawQueue.queues[entry.meshLayoutQueueIndex].queues[entry.shaderQueueIndex].queues[entry.materialQueueIndex].orderedQueue.erase(entry.meshIndex);
         modified = true;
     }
 
