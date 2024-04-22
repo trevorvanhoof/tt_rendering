@@ -68,6 +68,10 @@ namespace TTRendering {
 		auto end() const { return keyToIndex.end(); }
 		const T& handle(size_t index) const { return handles[index]; }
 		T& handle(size_t index) { return handles[index]; }
+
+		const T& operator[](const K& key) const {
+			return *find(key);
+		}
 	};
 
 	template<typename T>

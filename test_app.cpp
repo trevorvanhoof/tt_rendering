@@ -14,9 +14,27 @@ enum class EKeyState {
     Up = 0b00,
 };
 
+struct RenderResourcePool {
+    TTRendering::HandleDict<std::string, TTRendering::BufferHandle> buffers;
+    TTRendering::HandleDict<std::string, TTRendering::MeshHandle> meshes;
+    TTRendering::HandleDict<std::string, TTRendering::ShaderHandle> shaders;
+    TTRendering::HandleDict<std::string, TTRendering::ImageHandle> images;
+    TTRendering::HandleDict<std::string, TTRendering::FramebufferHandle> framebuffers;
+};
+
+struct SimpleScene {
+    // Active entities, order may be important.
+    std::vector<class Entity*> entities;
+    
+    // Components will initialize their draws in this pass.
+    TTRendering::RenderPass renderPass;
+};
+
 struct TickContext {
-    // Rendering
-    TTRendering::RenderingContext* context = nullptr;
+    // Rendering 
+    // Context, may not be null once the context is used.
+    TTRendering::RenderingContext* render;
+    RenderResourcePool resources;
 
     // Keyboard
     std::unordered_map<unsigned int, EKeyState> keyStates;
@@ -28,6 +46,9 @@ struct TickContext {
     // Screen
     TT::Vec2 resolution;
 
+    // Active scene, may not be null once the context is used.
+    SimpleScene* scene;
+    /*
     // Active entities, order may be important
     std::vector<class Entity*> entities;
 
@@ -41,13 +62,14 @@ struct TickContext {
 
     TTRendering::NullableHandle<TTRendering::FramebufferHandle> fbo;
     TTRendering::RenderPass fboTestPass;
+    */
 };
 
 enum class ComponentType {
     Transform,
     Sprite,
-    Particle,
-    Font,
+    ExampleParticle,
+    ExampleFont,
 };
 
 #define DECL_COMPONENT_TYPE(LABEL, IS_SINGLE_USE) static const ComponentType componentType = ComponentType::LABEL; virtual ComponentType type() const override; static const bool isSingleUse = IS_SINGLE_USE;
@@ -237,15 +259,15 @@ protected:
 public:
     DECL_COMPONENT_TYPE(Sprite, true);
 
-    TTRendering::ImageHandle* image = nullptr;
+    TTRendering::NullableHandle<TTRendering::ImageHandle> image = nullptr;
 
     void initRenderingResources(TickContext& context) override {
         if(!image)
             return;
 
-        TTRendering::MaterialHandle material = context.context->createMaterial(*context.imageShader, TTRendering::MaterialBlendMode::AlphaTest);
+        TTRendering::MaterialHandle material = context.render->createMaterial(context.resources.shaders["imageShader"], TTRendering::MaterialBlendMode::AlphaTest);
         material.set("uImage", *image);
-        context.fboTestPass.addToDrawQueue(*context.quadMesh, material, &pushConstants);
+        context.scene->renderPass.addToDrawQueue(context.resources.meshes["quadMesh"], material, &pushConstants);
         
         transform = entity.component<Transform>();
     }
@@ -258,7 +280,7 @@ public:
 
 IMPL_COMPONENT_TYPE(Sprite);
 
-class Particle : public Component {
+class ExampleParticle : public Component {
 protected:
     using Component::Component;
 
@@ -272,29 +294,29 @@ protected:
     Transform* transform = nullptr;
 
 public:
-    DECL_COMPONENT_TYPE(Particle, true);
+    DECL_COMPONENT_TYPE(ExampleParticle, true);
 
     void initRenderingResources(TickContext& context) override {
         // Reimplemented from Sprite.
         // if(!image) return;
 
         // Generate particle positions in a buffer
-        TTRendering::BufferHandle ssbo = context.context->createBuffer(instanceCount * sizeof(float) * 6, nullptr, TTRendering::BufferMode::DynamicDraw);
+        TTRendering::BufferHandle ssbo = context.render->createBuffer(instanceCount * sizeof(float) * 6, nullptr, TTRendering::BufferMode::DynamicDraw);
 
         {
-            initMtl = context.context->createMaterial(context.context->fetchShader({context.context->fetchShaderStage("particles.compute.glsl")}));
+            initMtl = context.render->createMaterial(context.render->fetchShader({context.render->fetchShaderStage("particles.compute.glsl")}));
             initMtl->set(0, ssbo);
-            context.context->dispatchCompute(*initMtl, instanceCount, 1, 1);
+            context.render->dispatchCompute(*initMtl, instanceCount, 1, 1);
         }
 
         {
-            tickMtl = context.context->createMaterial(context.context->fetchShader({context.context->fetchShaderStage("particles_tick.compute.glsl")}));
+            tickMtl = context.render->createMaterial(context.render->fetchShader({context.render->fetchShaderStage("particles_tick.compute.glsl")}));
             tickMtl->set(0, ssbo);
         }
 
         // Build an instanced quad
-        TTRendering::MeshHandle instancedQuad = context.context->createMesh(
-            4, *context.quadVbo, { 
+        TTRendering::MeshHandle instancedQuad = context.render->createMesh(
+            4, context.resources.buffers["quadVbo"], {
                 // vec2[4] vertex positions
                 { TTRendering::MeshAttribute::Dimensions::D2, TTRendering::MeshAttribute::ElementType::F32, 0 } 
             }, 
@@ -308,17 +330,17 @@ public:
         
         // Draw instanced particles
         // TODO: these should be global / shared
-        TTRendering::MaterialHandle material = context.context->createMaterial(*context.instancedImageShader, TTRendering::MaterialBlendMode::AlphaTest);
+        TTRendering::MaterialHandle material = context.render->createMaterial(context.resources.shaders["instancedImageShader"], TTRendering::MaterialBlendMode::AlphaTest);
 
         std::vector<TTRendering::NullableHandle<TTRendering::ImageHandle>> images = {
-            context.context->loadImage("Sprites/Atari Tulip_01_large 600x600.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp),
-            context.context->loadImage("Sprites/Fanta blikje.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp),
-            context.context->loadImage("Sprites/Frikandel Speciaal.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp),
-            context.context->loadImage("Sprites/grolsch beugel.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp),
-            context.context->loadImage("Sprites/Jesus approves (1).png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp),
-            context.context->loadImage("Sprites/kaasaugurkui 400x400.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp),
-            context.context->loadImage("Sprites/kaasblokjes.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp),
-            context.context->loadImage("Sprites/Rookworst 600x400.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp),
+            context.resources.images["tulip"],
+            context.resources.images["fanta"],
+            context.resources.images["frikandel"],
+            context.resources.images["grolsch"],
+            context.resources.images["jesus"],
+            context.resources.images["kaasaugurkui"],
+            context.resources.images["kaasblokjes"],
+            context.resources.images["rookworst"],
         };
 
         int i = 0;
@@ -331,7 +353,7 @@ public:
             material.set("uImageCount", i);
         }
 
-        context.fboTestPass.addToDrawQueue(instancedQuad, material, &pushConstants, instanceCount);
+        context.scene->renderPass.addToDrawQueue(instancedQuad, material, &pushConstants, instanceCount);
 
         transform = entity.component<Transform>();
     }
@@ -339,13 +361,13 @@ public:
     void tick(TickContext& context) override {
         if(initMtl) {
             if(context.keyStates[VK_SPACE] == EKeyState::Press) {
-                context.context->dispatchCompute(*initMtl, instanceCount, 1, 1);
+                context.render->dispatchCompute(*initMtl, instanceCount, 1, 1);
             }
         }
 
         if(tickMtl) {
             tickMtl->set("uDeltaTime", (float)context.deltaTime);
-            context.context->dispatchCompute(*tickMtl, instanceCount, 1, 1);
+            context.render->dispatchCompute(*tickMtl, instanceCount, 1, 1);
         }
 
         if(transform) {
@@ -358,9 +380,9 @@ public:
     }
 };
 
-IMPL_COMPONENT_TYPE(Particle);
+IMPL_COMPONENT_TYPE(ExampleParticle);
 
-class Font : public Component {
+class ExampleFont : public Component {
     using Component::Component;
 
     // TODO: This be global
@@ -398,23 +420,23 @@ class Font : public Component {
     Transform* transform = nullptr;
 
 public:
-    DECL_COMPONENT_TYPE(Font, true);
+    DECL_COMPONENT_TYPE(ExampleFont, true);
 
     std::string text = "Hello World!";
 
     void initRenderingResources(TickContext& context) override {
         // TODO: Investigate multiple texture pooling and unlimited font count of https://github.com/akrinke/Font-Stash
         // Create GL stash for 512x512 texture, our coordinate system has zero at top-left.
-        fs = glfonsCreate(512, 512, FONS_ZERO_BOTTOMLEFT, context.context);
+        fs = glfonsCreate(512, 512, FONS_ZERO_BOTTOMLEFT, context.render);
         // Add font to stash.
         fontNormal = fonsAddFont(fs, "sans", "C:\\Windows\\fonts\\arial.ttf"); // "DroidSerif-Regular.ttf");
-        auto shader = context.context->fetchShader({
-            context.context->fetchShaderStage("fontstash.vert.glsl"), 
-            context.context->fetchShaderStage("fontstash.geom.glsl"), 
-            context.context->fetchShaderStage("fontstash.frag.glsl")});
+        auto shader = context.render->fetchShader({
+            context.render->fetchShaderStage("fontstash.vert.glsl"), 
+            context.render->fetchShaderStage("fontstash.geom.glsl"), 
+            context.render->fetchShaderStage("fontstash.frag.glsl")});
 
         // Per text mesh we may want a unique material so we can colorize
-        auto material = context.context->createMaterial(shader, TTRendering::MaterialBlendMode::Alpha);
+        auto material = context.render->createMaterial(shader, TTRendering::MaterialBlendMode::Alpha);
         material.set("uImage", glFonsAtlas(fs));
 
         std::vector<FONSpoint> layout;
@@ -423,23 +445,23 @@ public:
         layoutText(fs, layout, text, 0, 0, false);*/
 
         float dx = 10, dy = 100;
-        unsigned int white = glfonsRGBA(255,255,255,255);
-        unsigned int brown = glfonsRGBA(192,128,0,128);
+        unsigned int white = glfonsRGBA(255,255,255,128);
+        unsigned int brown = glfonsRGBA(255,128,0,128);
         fonsSetFont(fs, fontNormal);
         fonsSetSize(fs, 124.0f);
         layoutText(fs, layout, "The big ", dx, dy, white, false);
         fonsSetSize(fs, 24.0f);
-        layoutText(fs, layout, "brown fox", dx, dy, brown, true);
+        layoutText(fs, layout, "frikandel XXL", dx, dy, brown, true);
 
-        auto vbo = context.context->createBuffer(layout.size() * sizeof(FONSpoint), (unsigned char*)&layout[0]);
-        auto mesh = context.context->createMesh(layout.size() * 2, vbo, {
+        auto vbo = context.render->createBuffer(layout.size() * sizeof(FONSpoint), (unsigned char*)&layout[0]);
+        auto mesh = context.render->createMesh(layout.size() * 2, vbo, {
             // alternating top left and bottom right points
             { TTRendering::MeshAttribute::Dimensions::D2, TTRendering::MeshAttribute::ElementType::F32, 0 },
             { TTRendering::MeshAttribute::Dimensions::D2, TTRendering::MeshAttribute::ElementType::F32, 1 },
             { TTRendering::MeshAttribute::Dimensions::D1, TTRendering::MeshAttribute::ElementType::U32, 2 },
             }, nullptr, TTRendering::PrimitiveType::Line);
 
-        _renderableHandle = context.fboTestPass.addToDrawQueue(mesh, material, &pushConstants);
+        _renderableHandle = context.scene->renderPass.addToDrawQueue(mesh, material, &pushConstants);
         _prevText = text;
 
         transform = entity.component<Transform>();
@@ -451,7 +473,7 @@ public:
     }
 };
 
-IMPL_COMPONENT_TYPE(Font);
+IMPL_COMPONENT_TYPE(ExampleFont);
 
 const int SCREEN_WIDTH = 1920;
 const int SCREEN_HEIGHT = 1080;
@@ -460,7 +482,7 @@ const int PIXEL_SIZE = 1;
 class App : public TT::Window {
 public:
     App() : TT::Window(), context(*this) {
-        tickContext.context = &context;
+        tickContext.render = &context;
 
         // Resize the window to HD
         // TODO: Fullscreen
@@ -473,7 +495,7 @@ public:
     }
 
     ~App() {
-        for (Entity* entity : tickContext.entities)
+        for (Entity* entity : tickContext.scene->entities)
             delete entity;
     }
 
@@ -481,7 +503,12 @@ public:
         tickContext.runtime = runtime;
         tickContext.deltaTime = deltaTime;
 
-        for (Entity* entity : tickContext.entities)
+        // Switch scenes
+        tickContext.scene = &particleScene;
+        tickContext.scene = &tunnelScene;
+
+        // Update active scene
+        for (Entity* entity : tickContext.scene->entities)
             entity->tick(tickContext);
 
         dropKeystates();
@@ -495,64 +522,126 @@ private:
     
     TTRendering::UniformBlockHandle forwardPassUniforms;
 
-    void initRenderingResources() {
-        auto fbo_cd = context.createImage(width(), height(), TTRendering::ImageFormat::RGBA32F, TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp);
-        auto fbo_d = context.createImage(width(), height(), TTRendering::ImageFormat::Depth32F, TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp);
-        tickContext.fbo = context.createFramebuffer({fbo_cd}, &fbo_d);
+    TTRendering::RenderPass presentPass;
 
-        tickContext.fboTestPass.clearColor = { 0.1f, 0.2f, 0.3f, 1.0f };
-        tickContext.fboTestPass.setFramebuffer(*tickContext.fbo);
-
-        tickContext.mainPass.clearColor = { 0.0f, 0.0f, 1.0f, 1.0f };
-        
-        // Get the sprite shader
-        tickContext.imageShader = context.fetchShader({ context.fetchShaderStage("image.vert.glsl"),context.fetchShaderStage("image.frag.glsl") });
-        tickContext.instancedImageShader = context.fetchShader({ context.fetchShaderStage("image_instanced.vert.glsl"),context.fetchShaderStage("image_instanced.frag.glsl") });
-
-        // Get the UBO for that shader
-        forwardPassUniforms = context.createUniformBuffer(*tickContext.imageShader, TTRendering::UniformBlockSemantics::Pass);
-        tickContext.fboTestPass.setPassUniforms(forwardPassUniforms);
-
-        // Get a quad
-        float quadVerts[] = {0,0, 1,0, 1,1, 0,1};
-        tickContext.quadVbo = context.createBuffer(sizeof(quadVerts), (unsigned char*)quadVerts);
-        tickContext.quadMesh = context.createMesh(4, *tickContext.quadVbo, { { TTRendering::MeshAttribute::Dimensions::D2, TTRendering::MeshAttribute::ElementType::F32, 0 } }, nullptr, TTRendering::PrimitiveType::TriangleFan);
-
+    void initSharedResources() {
+        // Framebuffer for scenes to render into
         {
-            Entity* e = new Entity;
-            tickContext.entities.push_back(e);
-            e->addComponent<Transform>();
-            e->addComponent<Font>();
+            tickContext.resources.images.insert("fbo_cd", context.createImage(width(), height(), TTRendering::ImageFormat::RGBA32F, TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp));
+            auto fbo_d = context.createImage(width(), height(), TTRendering::ImageFormat::Depth32F, TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp);
+            tickContext.resources.images.insert("fbo_d", fbo_d);
+            tickContext.resources.framebuffers.insert("fbo", context.createFramebuffer({ tickContext.resources.images["fbo_cd"] }, &fbo_d));
         }
+
+        // Sprite shaders
+        {
+            tickContext.resources.shaders.insert("imageShader", context.fetchShader({ context.fetchShaderStage("image.vert.glsl"),context.fetchShaderStage("image.frag.glsl") }));
+            tickContext.resources.shaders.insert("instancedImageShader", context.fetchShader({context.fetchShaderStage("image_instanced.vert.glsl"),context.fetchShaderStage("image_instanced.frag.glsl")}));
+
+            // Get the pass uniforms from the first shader we load because I don't support arbitrary UBO definitions yet.
+            forwardPassUniforms = context.createUniformBuffer(tickContext.resources.shaders["imageShader"], TTRendering::UniformBlockSemantics::Pass);
+        }
+
+        // Quad
+        {
+            float quadVerts[] = { 0,0, 1,0, 1,1, 0,1 };
+            tickContext.resources.buffers.insert("quadVbo", context.createBuffer(sizeof(quadVerts), (unsigned char*)quadVerts));
+            tickContext.resources.meshes.insert("quadMesh", context.createMesh(4, tickContext.resources.buffers["quadVbo"], { {TTRendering::MeshAttribute::Dimensions::D2, TTRendering::MeshAttribute::ElementType::F32, 0} }, nullptr, TTRendering::PrimitiveType::TriangleFan));
+        }
+
+        // Set up the present pass
+        {
+            auto blitMaterial = context.createMaterial(context.fetchShader({ context.fetchShaderStage("noop.vert.glsl"), context.fetchShaderStage("blit.frag.glsl") }));
+            blitMaterial.set("uImage", tickContext.resources.images["fbo_cd"]);
+            presentPass.addToDrawQueue(tickContext.resources.meshes["quadMesh"], blitMaterial);
+            presentPass.clearColor = { 0.0f, 0.0f, 1.0f, 1.0f };
+        }
+
+        // Load our funky sprites
+        {
+            tickContext.resources.images.insert("tulip", *context.loadImage("Sprites/Atari Tulip_01_large 600x600.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp));
+            tickContext.resources.images.insert("fanta", *context.loadImage("Sprites/Fanta blikje.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp));
+            tickContext.resources.images.insert("frikandel", *context.loadImage("Sprites/Frikandel Speciaal.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp));
+            tickContext.resources.images.insert("grolsch", *context.loadImage("Sprites/grolsch beugel.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp));
+            tickContext.resources.images.insert("jesus", *context.loadImage("Sprites/Jesus approves (1).png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp));
+            tickContext.resources.images.insert("kaasaugurkui", *context.loadImage("Sprites/kaasaugurkui 400x400.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp));
+            tickContext.resources.images.insert("kaasblokjes", *context.loadImage("Sprites/kaasblokjes.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp));
+            tickContext.resources.images.insert("rookworst", *context.loadImage("Sprites/Rookworst 600x400.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp));
+        }
+    }
+
+    void finalizeScene(SimpleScene& scene) {
+        // Finalize scene
+        scene.renderPass.setPassUniforms(forwardPassUniforms);
+        tickContext.scene = &scene;
+        for (Entity* entity : scene.entities)
+            entity->initRenderingResources(tickContext);
+    }
+    
+    SimpleScene particleScene;
+    void initParticleScene() {
+        particleScene.renderPass.clearColor = { 0.1f, 0.2f, 0.3f, 1.0f };
+        particleScene.renderPass.setFramebuffer(tickContext.resources.framebuffers["fbo"]);
 
         {
             // Spawn an entity with a sprite to use
             Entity* e = new Entity;
-            tickContext.entities.push_back(e);
+            particleScene.entities.push_back(e);
 
-            auto frikandel = context.loadImage("Sprites/Frikandel Speciaal.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp);
-            TT::assertFatal(frikandel);
-            unsigned int w, h; 
-            context.imageSize(*frikandel, w, h);
+            auto frikandel = tickContext.resources.images["frikandel"];
+            unsigned int w, h;
+            context.imageSize(frikandel, w, h);
 
-            e->addComponent<Transform>()->setScale({(float)w, (float)h, 1.0f});
-            e->component<Transform>()->setTranslate({(float)w * -0.5f, (float)h * -0.5f, 0.0f});
+            e->addComponent<Transform>()->setScale({ (float)w, (float)h, 1.0f });
+            e->component<Transform>()->setTranslate({ (float)w * -0.5f, (float)h * -0.5f, 0.0f });
             e->addComponent<Sprite>()->image = frikandel;
         }
 
         {
+            // Spawn the particles
             Entity* e = new Entity;
-            tickContext.entities.push_back(e);
+            particleScene.entities.push_back(e);
             e->addComponent<Transform>();
-            e->addComponent<Particle>();
+            e->addComponent<ExampleParticle>();
         }
 
-        for(Entity* entity : tickContext.entities)
-            entity->initRenderingResources(tickContext);
+        {
+            // Spawn example font
+            Entity* e = new Entity;
+            particleScene.entities.push_back(e);
+            e->addComponent<Transform>();
+            e->addComponent<ExampleFont>();
+        }
 
-        auto blitMaterial = context.createMaterial(context.fetchShader({ context.fetchShaderStage("noop.vert.glsl"), context.fetchShaderStage("blit.frag.glsl") }));
-        blitMaterial.set("uImage", fbo_cd);
-        tickContext.mainPass.addToDrawQueue(*tickContext.quadMesh, blitMaterial);
+        finalizeScene(particleScene);
+    }
+
+    SimpleScene tunnelScene;
+    void initTunnelScene() {
+        tunnelScene.renderPass.clearColor = { 0.1f, 0.2f, 0.3f, 1.0f };
+        tunnelScene.renderPass.setFramebuffer(tickContext.resources.framebuffers["fbo"]);
+
+        {
+            // Spawn an entity with a sprite to use
+            Entity* e = new Entity;
+            tunnelScene.entities.push_back(e);
+
+            unsigned int w, h;
+            auto rookworst = tickContext.resources.images["rookworst"];
+            context.imageSize(rookworst, w, h);
+
+            e->addComponent<Transform>()->setScale({ (float)w, (float)h, 1.0f });
+            e->component<Transform>()->setTranslate({ (float)w * -0.5f, (float)h * -0.5f, 0.0f });
+            e->addComponent<Sprite>()->image = rookworst;
+        }
+
+        finalizeScene(tunnelScene);
+    }
+
+    void initRenderingResources() {
+        initSharedResources(); // <- must fill out forwardPassUniforms!
+        initParticleScene(); // <- must each call finalizeScene on the respective scene at the end
+        initTunnelScene();
     }
 
     void onResizeEvent(const TT::ResizeEvent& event) override {
@@ -563,7 +652,7 @@ private:
             sizeKnown = true;
             initRenderingResources();
         } else {
-            context.resizeFramebuffer(*tickContext.fbo, event.width, event.height);
+            context.resizeFramebuffer(tickContext.resources.framebuffers["fbo"], event.width, event.height);
         }
     }
 
@@ -576,8 +665,8 @@ private:
         forwardPassUniforms.set("uVP", uV * uP);
 
         context.beginFrame();
-        context.drawPass(tickContext.fboTestPass);
-        context.drawPass(tickContext.mainPass);
+        context.drawPass(tickContext.scene->renderPass);
+        context.drawPass(presentPass);
         context.endFrame();
     }
 

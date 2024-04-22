@@ -604,7 +604,7 @@ namespace TTRendering {
 
     void OpenGLContext::bindMaterialSSBOs(const MaterialHandle& material, size_t shaderIdentifier) const {
         for(const auto& pair : material._ssbos) {
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, pair.first, (GLuint)material._ssbos.handle(pair.second).identifier());
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, (GLuint)pair.first, (GLuint)material._ssbos.handle(pair.second).identifier());
         }
     }
 
