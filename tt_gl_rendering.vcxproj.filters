@@ -160,6 +160,12 @@
     <None Include="rookworsttunnel.frag.glsl">
       <Filter>Resource Files</Filter>
     </None>
+    <None Include="infinidel.vert.glsl">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="infinidel.frag.glsl">
+      <Filter>Resource Files</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <Text Include="ThirdParty\fontstash\LICENSE.txt">

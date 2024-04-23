@@ -170,6 +170,8 @@
     <None Include="image.vert.glsl" />
     <None Include="image_instanced.frag.glsl" />
     <None Include="image_instanced.vert.glsl" />
+    <None Include="infinidel.frag.glsl" />
+    <None Include="infinidel.vert.glsl" />
     <None Include="noop.vert.glsl" />
     <None Include="particles.compute.glsl" />
     <None Include="particles_tick.compute.glsl" />

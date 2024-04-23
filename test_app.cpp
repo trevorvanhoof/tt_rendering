@@ -72,7 +72,8 @@ enum class ComponentType {
     Sprite,
     ExampleParticle,
     ExampleFont,
-    RookworstTunnel,
+    InstancedMesh,
+    Font,
 };
 
 #define DECL_COMPONENT_TYPE(LABEL, IS_SINGLE_USE) static const ComponentType componentType = ComponentType::LABEL; virtual ComponentType type() const override; static const bool isSingleUse = IS_SINGLE_USE;
@@ -385,6 +386,155 @@ public:
 
 IMPL_COMPONENT_TYPE(ExampleParticle);
 
+struct FONSpoint {
+    float x, y, u, v;
+    unsigned int cd;
+};
+
+class FontGlobals{
+    FONScontext* fs;
+    std::unordered_map<std::string, int> fontByName;
+    TTRendering::NullableHandle<TTRendering::ShaderHandle> _shader;
+
+public:
+    void loadFont(const char* path, const char* name) {
+        fontByName[name] = fonsAddFont(fs, "sans", path);
+    }
+
+    int font(const char* name) const {
+        auto it = fontByName.find(name);
+        TT::assert(it != fontByName.end());
+        return it->second;
+    }
+
+    void initRenderingResources(TTRendering::RenderingContext& context) {
+        // TODO: Investigate multiple texture pooling and unlimited font count of https://github.com/akrinke/Font-Stash
+        // Create GL stash for 512x512 texture, our coordinate system has zero at top-left.
+        fs = glfonsCreate(512, 512, FONS_ZERO_BOTTOMLEFT, &context);
+
+        _shader = context.fetchShader({
+            context.fetchShaderStage("fontstash.vert.glsl"),
+            context.fetchShaderStage("fontstash.geom.glsl"),
+            context.fetchShaderStage("fontstash.frag.glsl") });
+    }
+
+    const TTRendering::ShaderHandle& shader() const {
+        return *_shader;
+    }
+
+    const TTRendering::ImageHandle& image() const { 
+        return glFonsAtlas(fs); 
+    }
+
+    void layoutText(std::vector<FONSpoint>& layout, const std::string& text, int font, float size, float& x, float& y, unsigned int color = 0, bool noClear = false) const {
+        fonsSetFont(fs, font);
+        fonsSetSize(fs, size);
+
+        if (noClear) {
+            layout.reserve(layout.size() + text.size());
+        } else {
+            layout.clear();
+            layout.reserve(text.size());
+        }
+        FONStextIter iter;
+        fonsTextIterInit(fs, &iter, x, y, text.data(), text.data() + text.size());
+        FONSquad q;
+        while (fonsTextIterNext(fs, &iter, &q)) {
+            layout.push_back({ q.x0,q.y0,q.s0,q.t0,color });
+            layout.push_back({ q.x1,q.y1,q.s1,q.t1,color });
+        }
+        x = iter.x;
+        y = iter.y;
+        // This is where the used glyphs are actually submitted to the texture.
+        // It can also try to emit triangles but since we don't submit any draw commands via fontstash that is avoided.
+        fonsFlush(fs);
+    }
+};
+
+// TODO: Move to tickContext? Could (additionally?) be a private static of Font.
+FontGlobals* gFontGlobals = new FontGlobals;
+
+class Font : public Component {
+    using Component::Component;
+
+    int _font = -1;
+    float _size = 24.0f;
+    unsigned int _color = glfonsRGBA(255, 255, 255, 255);
+    std::string _text;
+    std::vector<FONSpoint> _layout;
+    Transform* transform = nullptr;
+    TTRendering::RenderEntry _renderableHandle;
+    TTRendering::PushConstants pushConstants;
+
+    void _update() {
+        if (_font == -1)
+            return;
+        float x = 0.0f, y = 0.0f;
+        gFontGlobals->layoutText(_layout, _text, _font, _size, x, y, _color);
+        // TODO: If we have a renderable handle we should re-mesh
+        // TODO: That also means we need to support mesh deletion
+    }
+
+public:
+    DECL_COMPONENT_TYPE(Font, false);
+
+    const std::string& text() const { return _text; }
+
+    void setText(const std::string& text) { 
+        _text = text;
+        _update();
+    }
+
+    void setColor(float r, float g, float b, float a) {
+        _color = glfonsRGBA(
+            (unsigned char)TT::clamp(r * 255.0f, 0.0f, 255.0f),
+            (unsigned char)TT::clamp(g * 255.0f, 0.0f, 255.0f),
+            (unsigned char)TT::clamp(b * 255.0f, 0.0f, 255.0f),
+            (unsigned char)TT::clamp(a * 255.0f, 0.0f, 255.0f));
+        for (FONSpoint& point : _layout)
+            point.cd = _color;
+    }
+
+    void setFont(const char* name) {
+        _font = gFontGlobals->font(name);
+        _update();
+    }
+
+    void setSize(float size) {
+        _size = size;
+        _update();
+    }
+
+    const std::vector<FONSpoint>& layout() const { 
+        return _layout; 
+    }
+
+    void initRenderingResources(TickContext& context) override {
+        // Per text mesh we may want a unique material so we can colorize
+        auto material = context.render->createMaterial(gFontGlobals->shader(), TTRendering::MaterialBlendMode::Alpha);
+        material.set("uImage", gFontGlobals->image());
+
+        auto vbo = context.render->createBuffer(_layout.size() * sizeof(FONSpoint), (unsigned char*)&_layout[0]);
+        auto mesh = context.render->createMesh(_layout.size() * 2, vbo, {
+            // alternating top left and bottom right points
+            { TTRendering::MeshAttribute::Dimensions::D2, TTRendering::MeshAttribute::ElementType::F32, 0 },
+            { TTRendering::MeshAttribute::Dimensions::D2, TTRendering::MeshAttribute::ElementType::F32, 1 },
+            { TTRendering::MeshAttribute::Dimensions::D1, TTRendering::MeshAttribute::ElementType::U32, 2 },
+            }, nullptr, TTRendering::PrimitiveType::Line);
+
+        _renderableHandle = context.scene->renderPass.addToDrawQueue(mesh, material, &pushConstants);
+
+        transform = entity.component<Transform>();
+    }
+
+    void tick(TickContext& context) override {
+        if (transform)
+            pushConstants.modelMatrix = transform->worldMatrix();
+    }
+};
+
+IMPL_COMPONENT_TYPE(Font);
+
 class ExampleFont : public Component {
     using Component::Component;
 
@@ -478,7 +628,7 @@ public:
 
 IMPL_COMPONENT_TYPE(ExampleFont);
 
-class RookworstTunnel : public Component {
+class InstancedMesh : public Component {
 protected:
     using Component::Component;
 
@@ -486,21 +636,21 @@ protected:
     Transform* transform = nullptr;
 
 public:
-    DECL_COMPONENT_TYPE(RookworstTunnel, true);
+    DECL_COMPONENT_TYPE(InstancedMesh, false);
+
+    // Config
+    TTRendering::NullableHandle<TTRendering::MeshHandle> mesh = nullptr;
+    TTRendering::NullableHandle<TTRendering::MaterialHandle> material = nullptr;
+    size_t instanceCount;
 
     TTRendering::NullableHandle<TTRendering::ImageHandle> image = nullptr;
-    TTRendering::NullableHandle<TTRendering::MaterialHandle> material = nullptr;
 
     void initRenderingResources(TickContext& context) override {
-        if (!image)
+        if (!image || !material || !mesh)
             return;
-
-        material = context.render->createMaterial(context.render->fetchShader({
-            context.render->fetchShaderStage("rookworsttunnel.vert.glsl"),
-            context.render->fetchShaderStage("rookworsttunnel.frag.glsl"),
-            }), TTRendering::MaterialBlendMode::AlphaTest);
+        
         material->set("uImage", *image);
-        context.scene->renderPass.addToDrawQueue(context.resources.meshes["quadMesh"], *material, &pushConstants, 1000);
+        context.scene->renderPass.addToDrawQueue(*mesh, *material, &pushConstants, instanceCount);
 
         transform = entity.component<Transform>();
     }
@@ -508,13 +658,13 @@ public:
     void tick(TickContext& context) override {
         if (transform)
             pushConstants.modelMatrix = transform->worldMatrix();
-        if(material)
+        if (material)
             material->set("uSeconds", (float)context.runtime);
 
     }
 };
 
-IMPL_COMPONENT_TYPE(RookworstTunnel);
+IMPL_COMPONENT_TYPE(InstancedMesh);
 
 const int SCREEN_WIDTH = 1920;
 const int SCREEN_HEIGHT = 1080;
@@ -546,10 +696,13 @@ public:
         tickContext.deltaTime = deltaTime;
 
         // Switch scenes
-        if(tickContext.keyStates['1'] == EKeyState::Press)
-            tickContext.scene = &scenes[0];
-        if (tickContext.keyStates['2'] == EKeyState::Press)
-            tickContext.scene = &scenes[1];
+        for (int i = 0; i < TT::min((int)scenes.size(), 9); ++i) {
+            char idx = '1' + i;
+            if (i == 10)
+                idx = '0';
+            if (tickContext.keyStates[idx] == EKeyState::Press)
+                tickContext.scene = &scenes[i];
+        }
 
         // Update active scene
         if(tickContext.scene)
@@ -574,6 +727,10 @@ private:
     TTRendering::RenderPass presentPass;
 
     void initSharedResources() {
+        // Font support
+        gFontGlobals->initRenderingResources(context);
+        gFontGlobals->loadFont("C:\\Windows\\fonts\\arial.ttf", "arial");
+
         // Framebuffer for scenes to render into
         {
             tickContext.resources.images.insert("fbo_cd", context.createImage(width(), height(), TTRendering::ImageFormat::RGBA32F, TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp));
@@ -618,6 +775,7 @@ private:
             tickContext.resources.images.insert("kaasaugurkui", *context.loadImage("Sprites/kaasaugurkui 400x400.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp));
             tickContext.resources.images.insert("kaasblokjes", *context.loadImage("Sprites/kaasblokjes.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp));
             tickContext.resources.images.insert("rookworst", *context.loadImage("Sprites/Rookworst 600x400.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp));
+            tickContext.resources.images.insert("infinidel", *context.loadImage("Sprites/Infinidel.png", TTRendering::ImageInterpolation::Nearest, TTRendering::ImageTiling::Clamp));
         }
     }
 
@@ -664,9 +822,9 @@ private:
         }
     }
 
-    static void initTunnelScene(const TickContext& tickContext, SimpleScene& scene) {
+    static void initTunnelScene(const TickContext& ctx, SimpleScene& scene) {
         scene.renderPass.clearColor = { 0.1f, 0.2f, 0.3f, 1.0f };
-        scene.renderPass.setFramebuffer(tickContext.resources.framebuffers["fbo"]);
+        scene.renderPass.setFramebuffer(ctx.resources.framebuffers["fbo"]);
 
         {
             // Spawn an entity with a sprite to use
@@ -674,12 +832,62 @@ private:
             scene.entities.push_back(e);
 
             unsigned int w, h;
-            auto rookworst = tickContext.resources.images["rookworst"];
-            tickContext.render->imageSize(rookworst, w, h);
+            auto rookworst = ctx.resources.images["rookworst"];
+            ctx.render->imageSize(rookworst, w, h);
 
             e->addComponent<Transform>()->setScale({ (float)w, (float)h, 1.0f });
             e->component<Transform>()->setTranslate({ (float)w * -0.5f, (float)h * -0.5f, 0.0f });
-            e->addComponent<RookworstTunnel>()->image = rookworst;
+
+            auto component = e->addComponent<InstancedMesh>();
+            component->material = ctx.render->createMaterial(ctx.render->fetchShader({
+                ctx.render->fetchShaderStage("rookworsttunnel.vert.glsl"),
+                ctx.render->fetchShaderStage("rookworsttunnel.frag.glsl"),
+                }), TTRendering::MaterialBlendMode::AlphaTest);
+            component->mesh = ctx.resources.meshes["quadMesh"];
+            component->instanceCount = 1000;
+            component->image = rookworst;
+        }
+    }
+
+    static void initScrollerScene(const TickContext& ctx, SimpleScene& scene) {
+        scene.renderPass.clearColor = { 0.1f, 0.2f, 0.3f, 1.0f };
+        scene.renderPass.setFramebuffer(ctx.resources.framebuffers["fbo"]);
+
+        {
+            // Spawn an entity with a sprite to use
+            Entity* e = new Entity;
+            scene.entities.push_back(e);
+
+            unsigned int w, h;
+            auto infinidel = ctx.resources.images["infinidel"];
+            ctx.render->imageSize(infinidel, w, h);
+
+            auto transform = e->addComponent<Transform>(); // ->setScale({ (float)w, (float)h, 1.0f });
+            transform->setScale({ 10, 10, 10 });
+            // e->component<Transform>()->setTranslate({ (float)w * -0.5f, (float)h * -0.5f, 0.0f });
+
+            auto component = e->addComponent<InstancedMesh>();
+            component->material = ctx.render->createMaterial(ctx.render->fetchShader({
+                ctx.render->fetchShaderStage("infinidel.vert.glsl"),
+                ctx.render->fetchShaderStage("infinidel.frag.glsl"),
+                }), TTRendering::MaterialBlendMode::AlphaTest);
+            component->mesh = ctx.resources.meshes["quadMesh"];
+            component->instanceCount = 50;
+            component->material->set("uInstanceCount", (int)component->instanceCount);
+            component->image = infinidel;
+
+            Entity* eText = new Entity;
+            scene.entities.push_back(eText);
+            auto tText = eText->addComponent<Transform>();
+            tText->setParent(*transform);
+            tText->setTranslate({ 0, 10, 0 });
+            tText->setScale({ 0.01f, 0.01f, 0.01f });
+            
+            auto cText = eText->addComponent<Font>();
+            // cText->setColor
+            cText->setFont("arial");
+            cText->setSize(48.0f);
+            cText->setText("frikandel XXL: the big sequel");
         }
     }
 
@@ -690,6 +898,7 @@ private:
         
         initParticleScene(tickContext, scenes.emplace_back());
         initTunnelScene(tickContext, scenes.emplace_back());
+        initScrollerScene(tickContext, scenes.emplace_back());
 
         for(SimpleScene& scene : scenes)
             finalizeScene(scene);
