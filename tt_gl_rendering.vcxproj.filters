@@ -166,6 +166,18 @@
     <None Include="infinidel.frag.glsl">
       <Filter>Resource Files</Filter>
     </None>
+    <None Include="example_particle.vert.glsl">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="example_particle.frag.glsl">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="saus_tick.compute.glsl">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="saus_init.compute.glsl">
+      <Filter>Resource Files</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <Text Include="ThirdParty\fontstash\LICENSE.txt">

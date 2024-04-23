@@ -59,6 +59,7 @@ enum class ComponentType {
     ExampleFont,
     InstancedMesh,
     Font,
+    Particle,
 };
 
 #define DECL_COMPONENT_TYPE(LABEL, IS_SINGLE_USE) static const ComponentType componentType = ComponentType::LABEL; virtual ComponentType type() const override; static const bool isSingleUse = IS_SINGLE_USE;
@@ -317,7 +318,8 @@ public:
         );
         
         // Draw instanced particles
-        TTRendering::MaterialHandle material = context.render->createMaterial(context.resources.shaders["instancedImageShader"], TTRendering::MaterialBlendMode::AlphaTest);
+        auto shader = context.render->fetchShader({ context.render->fetchShaderStage("example_particle.vert.glsl"), context.render->fetchShaderStage("example_particle.frag.glsl") });
+        TTRendering::MaterialHandle material = context.render->createMaterial(shader, TTRendering::MaterialBlendMode::AlphaTest);
 
         std::vector<TTRendering::NullableHandle<TTRendering::ImageHandle>> images = {
             context.resources.images["tulip"],
@@ -368,6 +370,113 @@ public:
 };
 
 IMPL_COMPONENT_TYPE(ExampleParticle);
+
+class InstancedMesh : public Component {
+protected:
+    using Component::Component;
+
+    TTRendering::PushConstants pushConstants;
+    Transform* transform = nullptr;
+
+public:
+    DECL_COMPONENT_TYPE(InstancedMesh, false);
+
+    // Config
+    TTRendering::NullableHandle<TTRendering::MeshHandle> mesh = nullptr;
+    TTRendering::NullableHandle<TTRendering::MaterialHandle> material = nullptr;
+    size_t instanceCount;
+
+    void initRenderingResources(TickContext& context) override {
+        if (!material || !mesh)
+            return;
+        context.scene->renderPass.addToDrawQueue(*mesh, *material, &pushConstants, instanceCount);
+        transform = entity.component<Transform>();
+    }
+
+    void tick(TickContext& context) override {
+        if (transform)
+            pushConstants.modelMatrix = transform->worldMatrix();
+        if (material)
+            material->set("uSeconds", (float)context.runtime);
+
+    }
+};
+
+IMPL_COMPONENT_TYPE(InstancedMesh);
+
+class Particle : public Component {
+protected:
+    using Component::Component;
+
+    TTRendering::NullableHandle<TTRendering::MaterialHandle> initMtl;
+    TTRendering::NullableHandle<TTRendering::MaterialHandle> tickMtl;
+
+public:
+    DECL_COMPONENT_TYPE(Particle, false);
+
+    // Note that none of these can be changed dynamically.
+    const char* initShaderPath;
+    const char* tickShaderPath;
+    // TODO: Expose the attribute layout for the ssbo
+    size_t maxParticles;
+
+    void initRenderingResources(TickContext& context) override {
+        // Generate particle positions in a buffer
+        TTRendering::BufferHandle ssbo = context.render->createBuffer(maxParticles * sizeof(float) * 7, nullptr, TTRendering::BufferMode::DynamicDraw);
+
+        {
+            initMtl = context.render->createMaterial(context.render->fetchShader({ context.render->fetchShaderStage(initShaderPath) }));
+            initMtl->set(0, ssbo);
+            context.render->dispatchCompute(*initMtl, (unsigned int)maxParticles, 1, 1);
+        }
+
+        {
+            tickMtl = context.render->createMaterial(context.render->fetchShader({ context.render->fetchShaderStage(tickShaderPath) }));
+            tickMtl->set(0, ssbo);
+        }
+
+        // Build an instanced quad
+        auto mesh = context.render->createMesh(
+            4, context.resources.buffers["quadVbo"], {
+                // vec2[4] vertex positions
+                { TTRendering::MeshAttribute::Dimensions::D2, TTRendering::MeshAttribute::ElementType::F32, 0 }
+            },
+            nullptr, TTRendering::PrimitiveType::TriangleFan,
+            maxParticles, &ssbo, {
+                // [vec3 position, vec3 velocity, float lifetime][instanceCount]
+                { TTRendering::MeshAttribute::Dimensions::D3, TTRendering::MeshAttribute::ElementType::F32, 1 },
+                { TTRendering::MeshAttribute::Dimensions::D3, TTRendering::MeshAttribute::ElementType::F32, 2 },
+                { TTRendering::MeshAttribute::Dimensions::D1, TTRendering::MeshAttribute::ElementType::F32, 3 }
+            }
+        );
+
+        // TODO: This assumes we have an instanced mesh, do we need a requireComponent system? or should we have an ensureComponent call instead so it adds only if needed?
+        // that way we can always rely on that in all code and not worry about order of operations so much.
+        auto meshRenderer = entity.component<InstancedMesh>();
+        meshRenderer->mesh = mesh;
+        meshRenderer->instanceCount = maxParticles;
+
+        // TODO: We still have order of operation problems, adding the InstancedMesh first results in it NOT initializing because it did not have a mesh and now we have to kick it here.
+        // In a way that is possible but we still can't know for sure if that mesh doesn't have to clean up other things.
+        meshRenderer->initRenderingResources(context);
+    }
+
+    void tick(TickContext& context) override {
+        if (initMtl) {
+            if (context.keyStates[VK_SPACE] == EKeyState::Press) {
+                context.render->dispatchCompute(*initMtl, (unsigned int)maxParticles, 1, 1);
+            }
+        }
+
+        if (tickMtl) {
+            tickMtl->set("uDeltaTime", (float)context.deltaTime);
+            tickMtl->set("uSeconds", (float)context.runtime);
+            context.render->dispatchCompute(*tickMtl, (unsigned int)maxParticles, 1, 1);
+        }
+    }
+};
+
+IMPL_COMPONENT_TYPE(Particle);
 
 struct FONSpoint {
     float x, y, u, v;
@@ -621,44 +730,6 @@ public:
 
 IMPL_COMPONENT_TYPE(ExampleFont);
 
-class InstancedMesh : public Component {
-protected:
-    using Component::Component;
-
-    TTRendering::PushConstants pushConstants;
-    Transform* transform = nullptr;
-
-public:
-    DECL_COMPONENT_TYPE(InstancedMesh, false);
-
-    // Config
-    TTRendering::NullableHandle<TTRendering::MeshHandle> mesh = nullptr;
-    TTRendering::NullableHandle<TTRendering::MaterialHandle> material = nullptr;
-    size_t instanceCount;
-
-    TTRendering::NullableHandle<TTRendering::ImageHandle> image = nullptr;
-
-    void initRenderingResources(TickContext& context) override {
-        if (!image || !material || !mesh)
-            return;
-        
-        material->set("uImage", *image);
-        context.scene->renderPass.addToDrawQueue(*mesh, *material, &pushConstants, instanceCount);
-
-        transform = entity.component<Transform>();
-    }
-
-    void tick(TickContext& context) override {
-        if (transform)
-            pushConstants.modelMatrix = transform->worldMatrix();
-        if (material)
-            material->set("uSeconds", (float)context.runtime);
-
-    }
-};
-
-IMPL_COMPONENT_TYPE(InstancedMesh);
-
 const int SCREEN_WIDTH = 1920;
 const int SCREEN_HEIGHT = 1080;
 const int PIXEL_SIZE = 1;
@@ -838,7 +909,7 @@ private:
                 }), TTRendering::MaterialBlendMode::AlphaTest);
             component->mesh = ctx.resources.meshes["quadMesh"];
             component->instanceCount = 1000;
-            component->image = rookworst;
+            component->material->set("uImage", rookworst);
         }
     }
 
@@ -867,7 +938,7 @@ private:
             component->mesh = ctx.resources.meshes["quadMesh"];
             component->instanceCount = 50;
             component->material->set("uInstanceCount", (int)component->instanceCount);
-            component->image = infinidel;
+            component->material->set("uImage", infinidel);
 
             Entity* eText = new Entity;
             scene.entities.push_back(eText);
@@ -881,6 +952,25 @@ private:
             cText->setFont("arial");
             cText->setSize(48.0f);
             cText->setText("frikandel XXL: the big sequel");
+        }
+
+        {
+            // Saus particle
+            Entity* e = new Entity;
+            scene.entities.push_back(e);
+
+            auto mesh = e->addComponent<InstancedMesh>();
+            mesh->material = ctx.render->createMaterial(ctx.render->fetchShader({
+                ctx.render->fetchShaderStage("image_instanced.vert.glsl"),
+                ctx.render->fetchShaderStage("image_instanced.frag.glsl"),
+                }), TTRendering::MaterialBlendMode::AlphaTest);
+            mesh->material->set("uParticleSize", 1.0f, 1.0f);
+            // mesh->material->set("uImage", de saus);
+
+            auto particle = e->addComponent<Particle>();
+            particle->initShaderPath = "saus_init.compute.glsl";
+            particle->tickShaderPath = "saus_tick.compute.glsl";
+            particle->maxParticles = 1001;
         }
     }
 

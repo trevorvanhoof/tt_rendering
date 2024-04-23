@@ -159,6 +159,8 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="blit.frag.glsl" />
+    <None Include="example_particle.frag.glsl" />
+    <None Include="example_particle.vert.glsl" />
     <None Include="fontstash.frag.glsl" />
     <None Include="fontstash.geom.glsl" />
     <None Include="fontstash.vert.glsl" />
@@ -177,6 +179,8 @@
     <None Include="particles_tick.compute.glsl" />
     <None Include="rookworsttunnel.frag.glsl" />
     <None Include="rookworsttunnel.vert.glsl" />
+    <None Include="saus_init.compute.glsl" />
+    <None Include="saus_tick.compute.glsl" />
     <None Include="ThirdParty\fontstash\README.md" />
   </ItemGroup>
   <ItemGroup>
