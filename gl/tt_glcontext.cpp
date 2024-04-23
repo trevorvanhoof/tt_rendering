@@ -733,4 +733,14 @@ namespace TTRendering {
         // Remnant to verify written data:
         // TT::Vec3* points = (TT::Vec3*)glMapBuffer(GL_SHADER_STORAGE_BUFFER, GL_READ_ONLY);
     }
+
+	void OpenGLContext::deleteBuffer(const BufferHandle& buffer) {
+		GLuint handle = (GLuint)buffer.identifier();
+		glDeleteBuffers(1, &handle);
+	}
+
+	void OpenGLContext::deleteMesh(const MeshHandle& mesh) {
+		GLuint handle = (GLuint)mesh.identifier();
+		glDeleteVertexArrays(1, &handle);
+	}
 }

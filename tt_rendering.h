@@ -470,10 +470,15 @@ namespace TTRendering {
 	};
 
     struct RenderEntry {
-        size_t shaderQueueIndex;
-        size_t materialQueueIndex;
-        size_t meshLayoutQueueIndex;
-        size_t meshIndex;
+        size_t shaderQueueIndex = -1;
+        size_t materialQueueIndex = -1;
+        size_t meshLayoutQueueIndex = -1;
+        size_t meshIndex = -1;
+
+		bool isNull() {
+			// We dive into a tree to build this so we only need to check the last one.
+			return meshIndex == -1;
+		}
     };
 
     namespace {
@@ -606,6 +611,15 @@ namespace TTRendering {
         virtual void resizeFramebuffer(const FramebufferHandle& framebuffer, unsigned int width, unsigned int height) = 0;
 		virtual FramebufferHandle createFramebuffer(const std::vector<ImageHandle>& colorAttachments, ImageHandle* depthStencilAttachment = nullptr) = 0;
         virtual void dispatchCompute(const MaterialHandle& material, unsigned int x, unsigned int y, unsigned int z) = 0;
+
+		virtual void deleteBuffer(const BufferHandle& buffer) = 0;
+		virtual void deleteMesh(const MeshHandle& mesh) = 0;
+		// virtual void deleteShaderStage(const ShaderStageHandle& mesh) = 0;
+		// virtual void deleteShader(const ShaderHandle& mesh) = 0;
+		// virtual void deleteImage(const ImageHandle& mesh) = 0;
+		// virtual void deleteMaterial(const MaterialHandle& material) = 0;
+		// virtual void deleteUniformBuffer(const UniformBlockHandle& material) = 0;
+		// virtual void deleteFramebuffer(const FramebufferHandle& material) = 0;
 	};
 }
 

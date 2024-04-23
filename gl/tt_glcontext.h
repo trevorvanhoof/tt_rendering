@@ -48,5 +48,7 @@ namespace TTRendering {
 		FramebufferHandle createFramebuffer(const std::vector<ImageHandle>& colorAttachments, ImageHandle* depthStencilAttachment) override;
 		void drawPass(RenderPass& pass) override;
         void dispatchCompute(const MaterialHandle& material, unsigned int x = 1, unsigned int y = 1, unsigned int z = 1) override;
+        void deleteBuffer(const BufferHandle& buffer) override;
+        void deleteMesh(const MeshHandle& mesh) override;
 	};
 }

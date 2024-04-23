@@ -20,7 +20,7 @@ struct RenderResourcePool {
     TTRendering::HandleDict<std::string, TTRendering::BufferHandle> buffers;
     TTRendering::HandleDict<std::string, TTRendering::MeshHandle> meshes;
     TTRendering::HandleDict<std::string, TTRendering::ShaderHandle> shaders;
-    TTRendering::HandleDict<std::string, TTRendering::ImageHandle> images;
+    TTRendering::HandleDict<std::string, TTRendering::ImageHandle> images; // TODO: fetch image from file path function so we can rely on a pool just like with shaders?
     TTRendering::HandleDict<std::string, TTRendering::FramebufferHandle> framebuffers;
 };
 
@@ -50,21 +50,6 @@ struct TickContext {
 
     // Active scene, may not be null once the context is used.
     SimpleScene* scene;
-    /*
-    // Active entities, order may be important
-    std::vector<class Entity*> entities;
-
-    // Shared rendering resources
-    // TODO: we should probably have a good way to track these, maybe a bunch of dicts? maybe a specific component that the user can edit? probably dicts...
-    TTRendering::NullableHandle<TTRendering::BufferHandle> quadVbo;
-    TTRendering::NullableHandle<TTRendering::MeshHandle> quadMesh;
-    TTRendering::NullableHandle<TTRendering::ShaderHandle> imageShader;
-    TTRendering::NullableHandle<TTRendering::ShaderHandle> instancedImageShader;
-    TTRendering::RenderPass mainPass;
-
-    TTRendering::NullableHandle<TTRendering::FramebufferHandle> fbo;
-    TTRendering::RenderPass fboTestPass;
-    */
 };
 
 enum class ComponentType {
@@ -290,7 +275,6 @@ protected:
 
     const int instanceCount = 128;
     
-    // TODO: Switch ssbo bindings on the fly so these can become static
     TTRendering::NullableHandle<TTRendering::MaterialHandle> initMtl;
     TTRendering::NullableHandle<TTRendering::MaterialHandle> tickMtl;
 
@@ -333,7 +317,6 @@ public:
         );
         
         // Draw instanced particles
-        // TODO: these should be global / shared
         TTRendering::MaterialHandle material = context.render->createMaterial(context.resources.shaders["instancedImageShader"], TTRendering::MaterialBlendMode::AlphaTest);
 
         std::vector<TTRendering::NullableHandle<TTRendering::ImageHandle>> images = {
@@ -463,16 +446,21 @@ class Font : public Component {
     std::string _text;
     std::vector<FONSpoint> _layout;
     Transform* transform = nullptr;
-    TTRendering::RenderEntry _renderableHandle;
+
     TTRendering::PushConstants pushConstants;
+
+    TTRendering::RenderEntry _renderableHandle;
+    TTRendering::NullableHandle<TTRendering::BufferHandle> vbo;
+    TTRendering::NullableHandle<TTRendering::MeshHandle> mesh;
+    TTRendering::NullableHandle<TTRendering::MaterialHandle> material;
+    bool needsRemesh = true;
 
     void _update() {
         if (_font == -1)
             return;
         float x = 0.0f, y = 0.0f;
         gFontGlobals->layoutText(_layout, _text, _font, _size, x, y, _color);
-        // TODO: If we have a renderable handle we should re-mesh
-        // TODO: That also means we need to support mesh deletion
+        needsRemesh = true;
     }
 
 public:
@@ -509,38 +497,44 @@ public:
         return _layout; 
     }
 
-    void initRenderingResources(TickContext& context) override {
-        // Per text mesh we may want a unique material so we can colorize
-        auto material = context.render->createMaterial(gFontGlobals->shader(), TTRendering::MaterialBlendMode::Alpha);
-        material.set("uImage", gFontGlobals->image());
-
-        auto vbo = context.render->createBuffer(_layout.size() * sizeof(FONSpoint), (unsigned char*)&_layout[0]);
-        auto mesh = context.render->createMesh(_layout.size() * 2, vbo, {
+    void _remesh(TickContext& context) {
+        vbo = context.render->createBuffer(_layout.size() * sizeof(FONSpoint), (unsigned char*)&_layout[0]);
+        mesh = context.render->createMesh(_layout.size() * 2, *vbo, {
             // alternating top left and bottom right points
             { TTRendering::MeshAttribute::Dimensions::D2, TTRendering::MeshAttribute::ElementType::F32, 0 },
             { TTRendering::MeshAttribute::Dimensions::D2, TTRendering::MeshAttribute::ElementType::F32, 1 },
             { TTRendering::MeshAttribute::Dimensions::D1, TTRendering::MeshAttribute::ElementType::U32, 2 },
             }, nullptr, TTRendering::PrimitiveType::Line);
+        _renderableHandle = context.scene->renderPass.addToDrawQueue(*mesh, *material, &pushConstants);
+    }
 
-        _renderableHandle = context.scene->renderPass.addToDrawQueue(mesh, material, &pushConstants);
-
+    void initRenderingResources(TickContext& context) override {
+        // Per text mesh we may want a unique material so we can colorize
+        material = context.render->createMaterial(gFontGlobals->shader(), TTRendering::MaterialBlendMode::Alpha);
+        material->set("uImage", gFontGlobals->image());
+        _remesh(context);
         transform = entity.component<Transform>();
     }
 
     void tick(TickContext& context) override {
         if (transform)
             pushConstants.modelMatrix = transform->worldMatrix();
+        if (needsRemesh) {
+            context.scene->renderPass.removeFromDrawQueue(_renderableHandle);
+            context.render->deleteBuffer(*vbo);
+            context.render->deleteMesh(*mesh);
+            _remesh(context);
+        }
     }
 };
 
 IMPL_COMPONENT_TYPE(Font);
 
+// TODO: Remove in favor of the general Font component
 class ExampleFont : public Component {
     using Component::Component;
 
-    // TODO: This be global
     FONScontext* fs;
-    // TODO: This be global
     int fontNormal;
     struct FONSpoint {
         float x, y, u, v;
@@ -578,7 +572,6 @@ public:
     std::string text = "Hello World!";
 
     void initRenderingResources(TickContext& context) override {
-        // TODO: Investigate multiple texture pooling and unlimited font count of https://github.com/akrinke/Font-Stash
         // Create GL stash for 512x512 texture, our coordinate system has zero at top-left.
         fs = glfonsCreate(512, 512, FONS_ZERO_BOTTOMLEFT, context.render);
         // Add font to stash.
