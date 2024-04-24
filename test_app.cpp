@@ -954,10 +954,13 @@ private:
             cText->setText("frikandel XXL: the big sequel");
         }
 
-        {
+        for(int i = 0; i < 10; ++i) {
             // Saus particle
             Entity* e = new Entity;
             scene.entities.push_back(e);
+
+            auto t = e->addComponent<Transform>();
+            t->setTranslate({ (float)i * 10.0f, 0.0, 0.0 });
 
             auto mesh = e->addComponent<InstancedMesh>();
             mesh->material = ctx.render->createMaterial(ctx.render->fetchShader({
@@ -971,6 +974,7 @@ private:
             particle->initShaderPath = "saus_init.compute.glsl";
             particle->tickShaderPath = "saus_tick.compute.glsl";
             particle->maxParticles = 1001;
+
         }
     }
 

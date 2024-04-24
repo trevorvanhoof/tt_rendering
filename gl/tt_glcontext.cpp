@@ -679,13 +679,13 @@ namespace TTRendering {
 
 				const auto& materialQueue = shaderQueue.queues[shaderIndex];
 				for (size_t materialIndex = 0; materialIndex < materialQueue.keys.size(); ++materialIndex) {
-					const MaterialHandle& material = materialQueue.keys[shaderIndex];
+					const MaterialHandle& material = materialQueue.keys[materialIndex];
 
                     bindMaterialResources(uniformInfo, material, shaderIdentifier);
 
                     glBindBuffer(GL_UNIFORM_BUFFER, pushConstantsUbo);
 
-					const auto& meshQueue = materialQueue.queues[shaderIndex];
+					const auto& meshQueue = materialQueue.queues[materialIndex];
 					for (const auto& pair : meshQueue) {
                         const auto& [meshIdentifier, instanceCount, pushConstants] = pair.second;
 						const MeshHandle* meshH = meshes.find(meshIdentifier);
@@ -693,7 +693,8 @@ namespace TTRendering {
 						const MeshHandle& mesh = *meshH;
 						glBindVertexArray((GLuint)mesh.identifier());
 
-						glBufferData(GL_UNIFORM_BUFFER, sizeof(PushConstants), pushConstants, GL_DYNAMIC_DRAW);
+						if(pushConstants)
+							glBufferData(GL_UNIFORM_BUFFER, sizeof(PushConstants), pushConstants, GL_DYNAMIC_DRAW);
 
 						if (mesh.indexBuffer() != nullptr) {
                             if(instanceCount > 0) {
