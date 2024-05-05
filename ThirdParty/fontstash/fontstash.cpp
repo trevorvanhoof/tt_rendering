@@ -13,5 +13,5 @@
 // #include "glfontstash.h"
 // #include "gl3corefontstash.h"
 // #include "gl46corefontstash.h"
-#include <gl/tt_gl_rendering_fontstash.h>
+#include "gl/tt_gl_rendering_fontstash.h"
 #undef GLFONTSTASH_IMPLEMENTATION

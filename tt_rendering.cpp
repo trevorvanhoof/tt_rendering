@@ -1,7 +1,7 @@
 #include "tt_rendering.h"
 
 #include <tt_messages.h>
-#include <ThirdParty/stb/stb_image.h>
+#include "stb/stb_image.h"
 
 namespace TTRendering {
 	HandleBase::HandleBase(size_t identifier) : _identifier(identifier) {}
