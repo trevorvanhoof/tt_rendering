@@ -251,6 +251,10 @@ namespace TTRendering {
 		BufferHandle(size_t identifier, size_t size);
 
 	public:
+        // TODO: Do not want.
+        BufferHandle() : HandleBase(0) {}
+
+    public:
 		size_t size() const;
 	};
 
@@ -273,7 +277,7 @@ namespace TTRendering {
 		PrimitiveType _primitiveType;
 		IndexType _indexType;
 		NullableHandle<BufferHandle> _indexBuffer;
-        size_t _numIstances;
+        size_t _numInstances;
 		NullableHandle<BufferHandle> _instanceBuffer;
 
 		MeshHandle(
@@ -284,8 +288,12 @@ namespace TTRendering {
 			PrimitiveType primitiveType,
 			IndexType indexType,
 			BufferHandle* indexBuffer = nullptr,
-            size_t _numIstances = 0,
-            BufferHandle* _instanceBuffer = nullptr);
+            size_t numIstances = 0,
+            BufferHandle* instanceBuffer = nullptr);
+
+    public:
+        // TODO: Do not want.
+        MeshHandle() : HandleBase(0) {}
 
 	public:
 		const BufferHandle vertexBuffer() const;
@@ -318,6 +326,8 @@ namespace TTRendering {
 		ImageInterpolation _interpolation;
 		ImageTiling _tiling;
 
+        // TODO: Do not want public.
+    public:
 		ImageHandle(size_t identifier, ImageFormat format, ImageInterpolation interpolation, ImageTiling tiling);
 
 	public:
@@ -333,7 +343,12 @@ namespace TTRendering {
 		std::vector<ImageHandle> _colorAttachments;
 		NullableHandle<ImageHandle> _depthStencilAttachment;
 
-		FramebufferHandle(size_t identifier, const std::vector<ImageHandle>& colorAttachments, ImageHandle* depthStencilAttachment);
+        // TODO: Do not want public.
+    public:
+		FramebufferHandle(size_t identifier, const std::vector<ImageHandle>& colorAttachments, const ImageHandle* depthStencilAttachment);
+
+        const std::vector<ImageHandle>& colorAttachments() const { return _colorAttachments; }
+        const ImageHandle* depthStencilAttachment() const { return _depthStencilAttachment.value(); }
 	};
 
 	class ShaderStageHandle final : public HandleBase {
@@ -350,13 +365,15 @@ namespace TTRendering {
 
 		ShaderStage _stage;
 
+        // TODO: Do not want public.
+    public:
 		ShaderStageHandle(size_t identifier, ShaderStage stage);
 
 	public:
 		ShaderStage stage() const;
 	};
 
-	class ShaderHandle final : public HandleBase {};
+	class ShaderHandle final : public HandleBase { public: ShaderHandle(size_t identifier) : HandleBase(identifier) {} };
 
 	enum class UniformType {
 		Unknown,
@@ -404,6 +421,11 @@ namespace TTRendering {
 
 	public:
 		UniformBlockHandle();
+
+        const HandleDict<std::string, ImageHandle>& images() const { return _images; }
+
+        // TODO: Do not want.
+        bool operator<(const UniformBlockHandle& rhs) const { return _uniformBuffer < rhs._uniformBuffer; }
 
 		size_t size() const;
 		unsigned char* cpuBuffer() const;
@@ -481,6 +503,9 @@ namespace TTRendering {
 		MaterialBlendMode _blendMode;
 
 		MaterialHandle(const ShaderHandle& shader, const UniformInfo& uniformInfo, unsigned char*& uniformBuffer, MaterialBlendMode blendMode = MaterialBlendMode::Opaque);
+
+        // TODO: Do not want public.
+    public:
 		MaterialHandle(const ShaderHandle& shader, MaterialBlendMode blendMode = MaterialBlendMode::Opaque);
 
 	public:
@@ -552,12 +577,15 @@ namespace TTRendering {
 
 		bool modified = true;
 
-		DrawQueue drawQueue;
+		DrawQueue _drawQueue;
 
 		NullableHandle<UniformBlockHandle> passUniforms; // empty means we have no global uniforms to forward to the pipeline
-		NullableHandle<FramebufferHandle> framebuffer; // empty means we draw to screen
+		NullableHandle<FramebufferHandle> _framebuffer; // empty means we draw to screen
 
 	public:
+        const DrawQueue& drawQueue() const { return _drawQueue; }
+        const FramebufferHandle* framebuffer() const { return _framebuffer.value(); }
+
 		void setPassUniforms(UniformBlockHandle handle);
 		void clearPassUniforms();
 

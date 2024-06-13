@@ -17,7 +17,7 @@ namespace TTRendering {
 		PrimitiveType primitiveType,
 		IndexType indexType,
 		BufferHandle* indexBuffer,
-        size_t numIstances,
+        size_t numInstances,
         BufferHandle* instanceBuffer) :
 		HandleBase(identifier),
         _meshLayoutHash(meshLayoutHash),
@@ -26,7 +26,7 @@ namespace TTRendering {
 		_primitiveType(primitiveType),
 		_indexType(indexType),
         _indexBuffer(indexBuffer),
-        _numIstances(numIstances),
+        _numInstances(numInstances),
         _instanceBuffer(instanceBuffer) {}
 	const BufferHandle MeshHandle::vertexBuffer() const { return _vertexBuffer; }
 	size_t MeshHandle::numElements() const { return _numElements; }
@@ -268,18 +268,18 @@ namespace TTRendering {
 	}
 
 	void RenderPass::setFramebuffer(FramebufferHandle handle) {
-		framebuffer.set(handle);
+		_framebuffer.set(handle);
 		modified = true;
 	}
 
 	void RenderPass::clearFramebuffer() {
-		framebuffer.clear();
+        _framebuffer.clear();
 		modified = true;
 	}
 
     RenderEntry RenderPass::addToDrawQueue(const MeshHandle& mesh, const MaterialHandle& material, const PushConstants* pushConstants, size_t instanceCount) {
         RenderEntry result;
-        auto& queue = drawQueue
+        auto& queue = _drawQueue
             .fetch(mesh._meshLayoutHash, result.meshLayoutQueueIndex)
             .fetch(material._shader.identifier(), result.shaderQueueIndex)
             .fetch(material, result.materialQueueIndex);
@@ -293,14 +293,14 @@ namespace TTRendering {
     }
 
     void RenderPass::removeFromDrawQueue(const RenderEntry& entry) {
-        drawQueue.queues[entry.meshLayoutQueueIndex].queues[entry.shaderQueueIndex].queues[entry.materialQueueIndex].orderedQueue.erase(entry.meshIndex);
+        _drawQueue.queues[entry.meshLayoutQueueIndex].queues[entry.shaderQueueIndex].queues[entry.materialQueueIndex].orderedQueue.erase(entry.meshIndex);
         modified = true;
     }
 
     void RenderPass::emptyQueue() {
-        drawQueue.meshLayoutHashToQueueIndex.clear();
-        drawQueue.keys.clear();
-        drawQueue.queues.clear();
+        _drawQueue.meshLayoutHashToQueueIndex.clear();
+        _drawQueue.keys.clear();
+        _drawQueue.queues.clear();
         modified = true;
     }
 
