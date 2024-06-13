@@ -5,9 +5,7 @@
 namespace TTRendering {
 	// TODO: This context does not clean up after itself
 	class OpenGLContext final : public RenderingContext {
-		HDC__* _windowsGLContext;
-		unsigned int screenWidth = 32;
-		unsigned int screenHeight = 32;
+		HDC__* _windowsGLContext = nullptr;
 		std::unordered_map<int, UniformInfo> getUniformBlocks(const ShaderHandle& shader, const std::vector<ShaderStageHandle>& stages) const override;
 
         const UniformInfo* materialUniformInfo(size_t shaderIdentifier) const;
@@ -15,16 +13,20 @@ namespace TTRendering {
         void applyMaterialBlendMode(const MaterialHandle& material) const;
         void uploadMaterial(const UniformInfo* uniformInfo, const MaterialHandle& material) const;
         void bindMaterialImages(const MaterialHandle& material, size_t shaderIdentifier) const;
-        void bindMaterialSSBOs(const MaterialHandle& material, size_t shaderIdentifier) const;
+        void bindMaterialSSBOs(const MaterialHandle& material) const;
 
     // public: // TODO: hacks for font rendering, it should probably be implemented by pooling as many meshes as are needed per frame instead
         const UniformInfo* useAndPrepareShader(size_t shaderIdentifier) const;
         void bindMaterialResources(const UniformInfo* uniformInfo, const MaterialHandle& material, size_t shaderIdentifier) const;
         // void bindFramebuffer(const TTRendering::FramebufferHandle* framebuffer);
 
+		ShaderStageHandle createShaderStage(const char* glslFilePath) override;
+		ShaderHandle createShader(const std::vector<ShaderStageHandle>& stages) override;
+
 	public:
+        // TODO: This is useful when running in another framework, but it means beginFrame and endFrame do not work.
+		OpenGLContext();
 		OpenGLContext(const TT::Window& window);
-		void windowResized(unsigned int width, unsigned int height) override;
 		void beginFrame() override;
 		void endFrame() override;
 
@@ -38,15 +40,13 @@ namespace TTRendering {
             size_t numInstances = 0, // mesh is not instanced if numInstances == 0
             BufferHandle* instanceData = nullptr, // ignored if numInstances == 0
             const std::vector<MeshAttribute>& instanceAttributeLayout = {}) override; // ignored if numInstances == 0 or instanceData == nullptr
-		ShaderStageHandle createShaderStage(const char* glslFilePath) override;
-		ShaderHandle createShader(const std::vector<ShaderStageHandle>& stages) override;
 		ImageHandle createImage(unsigned int width, unsigned int height, ImageFormat format, ImageInterpolation interpolation = ImageInterpolation::Linear, ImageTiling tiling = ImageTiling::Repeat, const unsigned char* data = nullptr) override;
         void imageSize(const ImageHandle& image, unsigned int& width, unsigned int& height) const override;
         void framebufferSize(const FramebufferHandle& framebuffer, unsigned int& width, unsigned int& height) const override;
 		void resizeImage(const ImageHandle& image, unsigned int width, unsigned int height) override;
 		void resizeFramebuffer(const FramebufferHandle& framebuffer, unsigned int width, unsigned int height) override;
-		FramebufferHandle createFramebuffer(const std::vector<ImageHandle>& colorAttachments, ImageHandle* depthStencilAttachment) override;
-		void drawPass(RenderPass& pass) override;
+		FramebufferHandle createFramebuffer(const std::vector<ImageHandle>& colorAttachments, const ImageHandle* depthStencilAttachment) override;
+		void drawPass(const RenderPass& pass, unsigned int defaultFramebuffer = 0) override;
         void dispatchCompute(const MaterialHandle& material, unsigned int x = 1, unsigned int y = 1, unsigned int z = 1) override;
         void deleteBuffer(const BufferHandle& buffer) override;
         void deleteMesh(const MeshHandle& mesh) override;

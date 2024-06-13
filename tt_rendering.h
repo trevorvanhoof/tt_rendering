@@ -14,8 +14,8 @@
 
 namespace TTRendering {
 	// TODO: Use tt_containers instead of this workaround?
-	// The reason these exist is because internally they generate std::pair
-	// which in turn fails to copy or default construct or whatever.
+	// The reason these exist is because internally std::map generates std::pair
+	// which in turn fails to copy or default construct or whatever. std::vector works fine.
 	template<typename T>
 	class HandlePool {
 		std::unordered_map<size_t, size_t> identifierToIndex;
@@ -30,6 +30,12 @@ namespace TTRendering {
 			identifierToIndex[identifier] = handles.size();
 			handles.push_back(handle);
 		}
+
+        void remove(const T& handle) {
+            // Note: we do not remove from handles here because
+            // that would invalidate all indices in identifierToIndex.
+            identifierToIndex.erase(handle.identifier());
+        }
 
 		const T* find(size_t identifier) const {
 			auto it = identifierToIndex.find(identifier);
@@ -59,12 +65,19 @@ namespace TTRendering {
 			handles.push_back(handle);
 		}
 
-		const T* find(const K& key) const {
-			auto it = keyToIndex.find(key);
-			if (it == keyToIndex.end())
-				return nullptr;
-			return &handles[it->second];
-		}
+        const T* find(const K& key) const {
+            auto it = keyToIndex.find(key);
+            if (it == keyToIndex.end())
+                return nullptr;
+            return &handles[it->second];
+        }
+
+        T* find(const K& key) {
+            auto it = keyToIndex.find(key);
+            if (it == keyToIndex.end())
+                return nullptr;
+            return &handles[it->second];
+        }
 
 		auto begin() const { return keyToIndex.begin(); }
 		auto end() const { return keyToIndex.end(); }
@@ -210,6 +223,13 @@ namespace TTRendering {
 		}
 	};
 
+    // Note: anything named handle should be copyable!
+    // It should not own anything.
+    // For this reason e.g. a uniform block will have a pointer
+    // into memory owned by the context.
+    // Removing a uniform block would invalidate all copies
+    // of that uniform block handle (though using it after 
+    // the fact is undefined behaviour).
 	class HandleBase {
 		BEFRIEND_CONTEXTS;
 
@@ -372,6 +392,9 @@ namespace TTRendering {
 
 		const UniformInfo* _uniformInfo;
 		unsigned char* _uniformBuffer;
+        // TODO: These are not owned by the rendering context,
+        // and therefore copying uniform block handles or material
+        // handles around will break.
 		HandleDict<std::string, ImageHandle> _images;
 		HandleDict<size_t, BufferHandle> _ssbos;
 
@@ -566,6 +589,9 @@ namespace TTRendering {
 	// and we don't have to go remove elements from the context's own delete queue.
 	class RenderingContext {
 	protected:
+        unsigned int screenWidth = 32;
+        unsigned int screenHeight = 32;
+
 		HandlePool<MeshHandle> meshes; // allocated meshes, used during drawPass but may be redundant
 		HandleDict<std::string, ShaderStageHandle> shaderStagePool; // file path or source code to shader stage map
 		HandleDict<size_t, ShaderHandle> shaderPool; // hash of the shader stages used by the shader to shader map
@@ -583,13 +609,21 @@ namespace TTRendering {
 		std::vector<unsigned char*> materialUniformBuffers;
 
 		static size_t hashMeshLayout(const std::vector<MeshAttribute>& attributes);
-		static size_t hashHandles(const HandleBase* handles, size_t count);
+
+        template<typename T> static size_t hashHandles(const T* handles, size_t count) {
+            size_t seed = count;
+            for (size_t i = 0; i < count; ++i)
+                seed = TT::hashCombine(seed, handles[i].identifier());
+            return seed;
+        }
 
 	public:
-		virtual void windowResized(unsigned int width, unsigned int height) = 0;
+		virtual void windowResized(unsigned int width, unsigned int height) { screenWidth = width; screenHeight = height; }
+        void resolution(unsigned int& width, unsigned int& height) const { width = screenWidth; height = screenHeight; }
+
 		virtual void beginFrame() = 0;
 		virtual void endFrame() = 0;
-		virtual void drawPass(RenderPass& pass) = 0;
+		virtual void drawPass(const RenderPass& pass, unsigned int defaultFramebuffer = 0) = 0;
 
 		virtual BufferHandle createBuffer(size_t size, unsigned char* data = nullptr, BufferMode mode = BufferMode::StaticDraw) = 0;
 		virtual MeshHandle createMesh(
@@ -611,7 +645,7 @@ namespace TTRendering {
 		virtual void framebufferSize(const FramebufferHandle& framebuffer, unsigned int& width, unsigned int& height) const = 0;
 		virtual void resizeImage(const ImageHandle& image, unsigned int width, unsigned int height) = 0;
         virtual void resizeFramebuffer(const FramebufferHandle& framebuffer, unsigned int width, unsigned int height) = 0;
-		virtual FramebufferHandle createFramebuffer(const std::vector<ImageHandle>& colorAttachments, ImageHandle* depthStencilAttachment = nullptr) = 0;
+		virtual FramebufferHandle createFramebuffer(const std::vector<ImageHandle>& colorAttachments, const ImageHandle* depthStencilAttachment = nullptr) = 0;
         virtual void dispatchCompute(const MaterialHandle& material, unsigned int x, unsigned int y, unsigned int z) = 0;
 
 		virtual void deleteBuffer(const BufferHandle& buffer) = 0;

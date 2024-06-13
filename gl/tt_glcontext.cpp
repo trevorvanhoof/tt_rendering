@@ -54,10 +54,10 @@ namespace {
 	GLenum glElementType(TTRendering::MeshAttribute::ElementType type) {
 		using namespace TTRendering;
 		switch (type) {
-		case MeshAttribute::ElementType::I8:
-			return GL_UNSIGNED_BYTE;
+        case MeshAttribute::ElementType::I8:
+            return GL_BYTE;
 		case MeshAttribute::ElementType::U8:
-			return GL_BYTE;
+			return GL_UNSIGNED_BYTE;
 		case MeshAttribute::ElementType::I16:
 			return GL_SHORT;
 		case MeshAttribute::ElementType::U16:
@@ -289,29 +289,29 @@ namespace TTRendering {
 		return result;
 	}
 
-	OpenGLContext::OpenGLContext(const TT::Window& window) {
-		_windowsGLContext = TTRendering::createGLContext(window);
+    OpenGLContext::OpenGLContext() {
         TTRendering::loadGLFunctions();
         glEnable(GL_DEPTH_TEST); TT_GL_DBG_ERR;
-		glGenBuffers(1, &passUbo);
-		glGenBuffers(1, &materialUbo);
-		glGenBuffers(1, &pushConstantsUbo);
-		glBindBuffer(GL_UNIFORM_BUFFER, pushConstantsUbo);
-		// glBufferData(GL_UNIFORM_BUFFER, sizeof(PushConstants), nullptr, GL_DYNAMIC_DRAW);
-		glBindBufferRange(GL_UNIFORM_BUFFER, (GLuint)UniformBlockSemantics::PushConstants, pushConstantsUbo, 0, sizeof(PushConstants));
-		glBindBuffer(GL_UNIFORM_BUFFER, 0);
-	}
+        glGenBuffers(1, &passUbo);
+        glGenBuffers(1, &materialUbo);
+        glGenBuffers(1, &pushConstantsUbo);
+        glBindBuffer(GL_UNIFORM_BUFFER, pushConstantsUbo);
+        // glBufferData(GL_UNIFORM_BUFFER, sizeof(PushConstants), nullptr, GL_DYNAMIC_DRAW);
+        glBindBufferRange(GL_UNIFORM_BUFFER, (GLuint)UniformBlockSemantics::PushConstants, pushConstantsUbo, 0, sizeof(PushConstants));
+        glBindBuffer(GL_UNIFORM_BUFFER, 0);
+    }
 
-	void OpenGLContext::windowResized(unsigned int width, unsigned int height) {
-		screenWidth = width;
-		screenHeight = height;
-	}
+    OpenGLContext::OpenGLContext(const TT::Window& window) {
+        _windowsGLContext = TTRendering::createGLContext(window);
+        OpenGLContext::OpenGLContext();
+    }
 
 	void OpenGLContext::beginFrame() {
 	}
 
 	void OpenGLContext::endFrame() {
-		SwapBuffers(_windowsGLContext);
+        if(_windowsGLContext)
+		    SwapBuffers(_windowsGLContext);
 	}
     
     BufferHandle OpenGLContext::createBuffer(size_t size, unsigned char* data, BufferMode mode) {
@@ -358,8 +358,6 @@ namespace TTRendering {
 			    vertexAttribPointer(attribute.location, ((int)attribute.dimensions + 1), glElementType(attribute.elementType), false, stride, (const void*)offset);
 			    offset += attribute.sizeInBytes();
 		    }
-
-		    glBindBuffer(GL_ARRAY_BUFFER, 0);
         }
 
 		// instancing
@@ -377,9 +375,9 @@ namespace TTRendering {
 				offset += attribute.sizeInBytes();
 		    }
 
-            glBindBuffer(GL_ARRAY_BUFFER, 0);
         }
 
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
 		glBindVertexArray(0);
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 
@@ -469,7 +467,7 @@ namespace TTRendering {
             resizeImage(*framebuffer._depthStencilAttachment, width, height);
     }
 
-	FramebufferHandle OpenGLContext::createFramebuffer(const std::vector<ImageHandle>& colorAttachments, ImageHandle* depthStencilAttachment) {
+	FramebufferHandle OpenGLContext::createFramebuffer(const std::vector<ImageHandle>& colorAttachments, const ImageHandle* depthStencilAttachment) {
 		// Verify we have more than 0 attachments
 		TT::assert(colorAttachments.size() > 0 || depthStencilAttachment != nullptr);
 
@@ -602,7 +600,7 @@ namespace TTRendering {
         }
     }
 
-    void OpenGLContext::bindMaterialSSBOs(const MaterialHandle& material, size_t shaderIdentifier) const {
+    void OpenGLContext::bindMaterialSSBOs(const MaterialHandle& material) const {
         for(const auto& pair : material._ssbos) {
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, (GLuint)pair.first, (GLuint)material._ssbos.handle(pair.second).identifier());
         }
@@ -612,7 +610,7 @@ namespace TTRendering {
         applyMaterialBlendMode(material);
         uploadMaterial(uniformInfo, material);
         bindMaterialImages(material, shaderIdentifier);
-        bindMaterialSSBOs(material, shaderIdentifier);
+        bindMaterialSSBOs(material);
     }
 
     void OpenGLContext::framebufferSize(const FramebufferHandle& framebuffer, unsigned int& width, unsigned int& height) const {
@@ -636,15 +634,15 @@ namespace TTRendering {
     }
 #endif
 
-	void OpenGLContext::drawPass(RenderPass& pass) {
+	void OpenGLContext::drawPass(const RenderPass& pass, unsigned int defaultFramebuffer) {
         // bindFramebuffer((const TTRendering::FramebufferHandle*)pass.framebuffer);
-        if (!pass.framebuffer) {
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        if (!pass._framebuffer) {
+            glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebuffer);
             glViewport(0, 0, screenWidth, screenHeight); TT_GL_DBG_ERR;
         } else {
-            glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)pass.framebuffer->identifier());
+            glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)pass._framebuffer->identifier());
             unsigned int width, height;
-            framebufferSize(*pass.framebuffer, width, height);
+            framebufferSize(*pass._framebuffer, width, height);
             glViewport(0, 0, width, height); TT_GL_DBG_ERR;
         }
 
@@ -669,9 +667,9 @@ namespace TTRendering {
 			glBindBufferRange(GL_UNIFORM_BUFFER, (GLuint)UniformBlockSemantics::Pass, passUbo, 0, requiredBufferSize);
 		}
 
-		for (size_t meshLayoutIndex = 0; meshLayoutIndex < pass.drawQueue.keys.size(); ++meshLayoutIndex) {
-			size_t meshLayoutHash = pass.drawQueue.keys[meshLayoutIndex];
-			const auto& shaderQueue = pass.drawQueue.queues[meshLayoutIndex];
+		for (size_t meshLayoutIndex = 0; meshLayoutIndex < pass._drawQueue.keys.size(); ++meshLayoutIndex) {
+			size_t meshLayoutHash = pass._drawQueue.keys[meshLayoutIndex];
+			const auto& shaderQueue = pass._drawQueue.queues[meshLayoutIndex];
 			for (size_t shaderIndex = 0; shaderIndex < shaderQueue.keys.size(); ++shaderIndex) {
 				size_t shaderIdentifier = shaderQueue.keys[shaderIndex];
 
@@ -720,7 +718,7 @@ namespace TTRendering {
 		glBindVertexArray(0);
 		glBindBuffer(GL_UNIFORM_BUFFER, 0);
 		glUseProgram(0);
-		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebuffer);
         glDisable(GL_BLEND);
         glDepthMask(true);
 	}
@@ -743,5 +741,6 @@ namespace TTRendering {
 	void OpenGLContext::deleteMesh(const MeshHandle& mesh) {
 		GLuint handle = (GLuint)mesh.identifier();
 		glDeleteVertexArrays(1, &handle);
+        meshes.remove(mesh);
 	}
 }

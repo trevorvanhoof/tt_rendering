@@ -39,7 +39,7 @@ namespace TTRendering {
 
 	ImageFormat ImageHandle::format() const { return _format; }
 	
-	FramebufferHandle::FramebufferHandle(size_t identifier, const std::vector<ImageHandle>& colorAttachments, ImageHandle* depthStencilAttachment) :
+	FramebufferHandle::FramebufferHandle(size_t identifier, const std::vector<ImageHandle>& colorAttachments, const ImageHandle* depthStencilAttachment) :
 		HandleBase(identifier), _colorAttachments(colorAttachments) {
 		if (depthStencilAttachment)
 			_depthStencilAttachment.set(*depthStencilAttachment);
@@ -66,7 +66,7 @@ namespace TTRendering {
 	}
 
 	bool UniformInfo::Field::operator==(const UniformInfo::Field& rhs) {
-		return type == rhs.type && offset == rhs.offset && name == rhs.name;
+		return type == rhs.type && offset == rhs.offset && name == rhs.name && arraySize == rhs.arraySize;
 	}
 
 	const UniformInfo::Field* UniformInfo::find(const char* key) const {
@@ -330,16 +330,7 @@ namespace TTRendering {
         }
         return finalHash;
     }
-
-    size_t RenderingContext::hashHandles(const HandleBase* handles, size_t count) {
-        if (!count)
-            return 0;
-        size_t hash = handles[0].identifier();
-        for (size_t i = 1; i < count; ++i)
-            hash = TT::hashCombine(hash, handles[i].identifier());
-        return hash;
-    }
-
+    
 	const ShaderStageHandle& RenderingContext::registerShaderStage(const char* glslFilePath, const ShaderStageHandle& handle) {
 		shaderStagePool.insert(glslFilePath, handle);
 		return handle;
@@ -360,7 +351,6 @@ namespace TTRendering {
 		TT::assert(shaderUniformInfo.contains(shader.identifier()));
 		const std::unordered_map<int, UniformInfo>& info = shaderUniformInfo.find(shader.identifier())->second;
 		auto it = info.find((int)UniformBlockSemantics::Material);
-		size_t bufferSize = 0;
 		if (it != info.end()) {
 			materialUniformBuffers.push_back(new unsigned char[it->second.bufferSize]);
 			return MaterialHandle(shader, it->second, materialUniformBuffers.back(), blendMode);
