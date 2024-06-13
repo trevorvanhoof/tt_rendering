@@ -1,7 +1,7 @@
 #define TT_GLEXT_IMPLEMENTATION
 #include "tt_gl.h"
-#include "tt_messages.h"
-#include "tt_window.h"
+#include "../../tt_cpplib/tt_messages.h"
+#include "../../tt_cpplib/tt_window.h"
 
 #pragma comment(lib, "opengl32.lib")
 

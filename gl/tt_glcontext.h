@@ -1,6 +1,6 @@
 #include "../tt_rendering.h"
 
-#include <tt_window.h>
+#include "../../tt_cpplib/tt_window.h"
 
 namespace TTRendering {
 	// TODO: This context does not clean up after itself

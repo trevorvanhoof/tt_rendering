@@ -1,6 +1,6 @@
 #include "tt_rendering.h"
 
-#include <tt_messages.h>
+#include "../../tt_cpplib/tt_messages.h"
 #include "stb/stb_image.h"
 
 namespace TTRendering {

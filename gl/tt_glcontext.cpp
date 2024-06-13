@@ -1,8 +1,8 @@
 #include "tt_glcontext.h"
 
 #include "tt_gl.h"
-#include <tt_window.h>
-#include <tt_files.h>
+#include "../../tt_cpplib/tt_window.h"
+#include "../../tt_cpplib/tt_files.h"
 
 #include <unordered_set>
 #include <string>

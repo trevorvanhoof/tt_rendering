@@ -1,10 +1,10 @@
 #pragma once
 
-#include "windont.h"
+#include "../../tt_cpplib/windont.h"
 #include <gl/gl.h>
 #include "KHR/glext.h"
-#include "tt_messages.h"
-#include "tt_window.h"
+#include "../../tt_cpplib/tt_messages.h"
+#include "../../tt_cpplib/tt_window.h"
 
 namespace TTRendering {
     void loadGLFunctions();

@@ -1,7 +1,7 @@
 #pragma once
 
-#include <tt_math.h>
-#include <tt_messages.h>
+#include "../tt_cpplib/tt_math.h"
+#include "../tt_cpplib/tt_messages.h"
 
 #include <vector>
 #include <unordered_map>

@@ -1,8 +1,8 @@
 #pragma once
 
 // #include "gl/tt_render_concepts.h"
-#include <ThirdParty/fontstash/fontstash.h>
-#include "tt_rendering.h"
+#include "../ThirdParty/fontstash/fontstash.h"
+#include "../tt_rendering.h"
 
 FONScontext* glfonsCreate(int width, int height, int flags, TTRendering::RenderingContext* renderContext);
 void glfonsDelete(FONScontext* ctx);
