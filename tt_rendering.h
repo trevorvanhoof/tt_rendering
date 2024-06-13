@@ -8,7 +8,9 @@
 #include <map>
 #include <string>
 
+#ifndef BEFRIEND_CONTEXTS
 #define BEFRIEND_CONTEXTS friend class RenderingContext; friend class OpenGLContext; friend class VkContext;
+#endif
 
 namespace TTRendering {
 	// TODO: Use tt_containers instead of this workaround?
