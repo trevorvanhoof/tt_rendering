@@ -126,12 +126,12 @@ namespace TTRendering {
 		return true;
 	}
 
-	UniformBlockHandle::UniformBlockHandle(const UniformInfo& uniformInfo, Resources*& resources) :
+	UniformBlockHandle::UniformBlockHandle(const UniformInfo& uniformInfo, UniformResources*& resources) :
 		_uniformInfo(&uniformInfo), _resources(resources) {
 	}
 
-	UniformBlockHandle::UniformBlockHandle() :
-		_uniformInfo(nullptr), _resources(nullptr) {
+	UniformBlockHandle::UniformBlockHandle(UniformResources*& resources) :
+		_uniformInfo(nullptr), _resources(resources) {
 	}
 
 	size_t UniformBlockHandle::size() const { return _uniformInfo ? _uniformInfo->bufferSize : 0; }
@@ -196,20 +196,22 @@ namespace TTRendering {
 	bool UniformBlockHandle::setBVec4(const char* key, int* value, unsigned int count) { return _setUniform(key, value, UniformType::BVec4, count); }
 
     bool UniformBlockHandle::set(const char* key, const ImageHandle& image) { 
+        if (!_resources) return false;
         _resources->images.insert(key, image);
         return true;
     }
 
     bool UniformBlockHandle::set(size_t binding, const BufferHandle& buffer) {
+        if (!_resources) return false;
         _resources->ssbos.insert(binding, buffer);
         return true;
     }
 
-	MaterialHandle::MaterialHandle(const ShaderHandle& shader, const UniformInfo& uniformInfo, Resources*& resources, MaterialBlendMode blendMode) :
+	MaterialHandle::MaterialHandle(const ShaderHandle& shader, const UniformInfo& uniformInfo, UniformResources*& resources, MaterialBlendMode blendMode) :
 		UniformBlockHandle(uniformInfo, resources), _shader(shader), _blendMode(blendMode) {
 	}
 
-	MaterialHandle::MaterialHandle(const ShaderHandle& shader, MaterialBlendMode blendMode) : UniformBlockHandle(), _shader(shader), _blendMode(blendMode) {}
+	MaterialHandle::MaterialHandle(const ShaderHandle& shader, UniformResources*& resources, MaterialBlendMode blendMode) : UniformBlockHandle(resources), _shader(shader), _blendMode(blendMode) {}
 
 	const ShaderHandle& MaterialHandle::shader() const { return _shader; }
 	
@@ -352,10 +354,11 @@ namespace TTRendering {
 		const std::unordered_map<int, UniformInfo>& info = shaderUniformInfo.find(shader.identifier())->second;
 		auto it = info.find((int)UniformBlockSemantics::Material);
 		if (it != info.end()) {
-            materialResources.push_back(new UniformBlockHandle::Resources {new unsigned char[it->second.bufferSize], {}, {} });
+            materialResources.push_back(new UniformResources {new unsigned char[it->second.bufferSize], {}, {} });
 			return MaterialHandle(shader, it->second, materialResources.back(), blendMode);
 		}
-		return MaterialHandle(shader, blendMode);
+        materialResources.push_back(new UniformResources {nullptr, {}, {} });
+		return MaterialHandle(shader, materialResources.back(), blendMode);
 	}
 
 	UniformBlockHandle RenderingContext::createUniformBuffer(const ShaderHandle& shader, const UniformBlockSemantics& semantic) {
@@ -365,10 +368,11 @@ namespace TTRendering {
 		const std::unordered_map<int, UniformInfo>& info = shaderUniformInfo.find(shader.identifier())->second;
 		auto it = info.find((int)semantic);
 		if (it != info.end()) {
-            materialResources.push_back(new UniformBlockHandle::Resources { new unsigned char[it->second.bufferSize], {}, {} });
+            materialResources.push_back(new UniformResources { new unsigned char[it->second.bufferSize], {}, {} });
 			return UniformBlockHandle(it->second, materialResources.back());
 		}
-		return UniformBlockHandle();
+        materialResources.push_back(new UniformResources {nullptr, {}, {} });
+		return UniformBlockHandle(materialResources.back());
 	}
 
 	ShaderStageHandle RenderingContext::fetchShaderStage(const char* glslFilePath) {
@@ -406,5 +410,6 @@ namespace TTRendering {
     const ImageHandle ImageHandle::Null(0, TTRendering::ImageFormat::RGBA32F, TTRendering::ImageInterpolation::Linear, TTRendering::ImageTiling::Clamp);
     const FramebufferHandle FramebufferHandle::Null(0, {}, nullptr);
     const ShaderHandle ShaderHandle::Null(0);
-    const MaterialHandle MaterialHandle::Null(ShaderHandle::Null);
+    namespace { UniformResources* _NullResource = nullptr; }
+    const MaterialHandle MaterialHandle::Null(ShaderHandle::Null, _NullResource);
 }

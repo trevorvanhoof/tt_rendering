@@ -417,6 +417,14 @@ namespace TTRendering {
 		const Field* find(const char* key) const;
 	};
 
+    namespace {
+        struct UniformResources {
+            unsigned char* uniformBuffer;
+            HandleDict<std::string, ImageHandle> images;
+            HandleDict<size_t, BufferHandle> ssbos;
+        };
+    }
+
 	class UniformBlockHandle {
 		BEFRIEND_CONTEXTS;
 
@@ -425,19 +433,13 @@ namespace TTRendering {
         const UniformInfo* _uniformInfo;
 
 	protected:
-        struct Resources {
-            unsigned char* uniformBuffer;
-            HandleDict<std::string, ImageHandle> images;
-            HandleDict<size_t, BufferHandle> ssbos;
-        };
-
         // The context owns the resources, so handles can safely be copied around.
-        Resources* _resources = nullptr;
+        UniformResources* _resources = nullptr;
         virtual bool isMaterialBlockHandle() const { return false; }
 
 		bool _setUniform(const char* key, void* src, UniformType srcType, unsigned int count = 1);
-		UniformBlockHandle(const UniformInfo& uniformInfo, Resources*& resources);
-        UniformBlockHandle();
+		UniformBlockHandle(const UniformInfo& uniformInfo, UniformResources*& resources);
+		UniformBlockHandle(UniformResources*& resources);
 
 	public:
         const HandleDict<std::string, ImageHandle>& images() const { return _resources->images; }
@@ -521,8 +523,8 @@ namespace TTRendering {
 		ShaderHandle _shader;
 		MaterialBlendMode _blendMode;
 
-		MaterialHandle(const ShaderHandle& shader, const UniformInfo& uniformInfo, Resources*& resources, MaterialBlendMode blendMode = MaterialBlendMode::Opaque);
-		MaterialHandle(const ShaderHandle& shader, MaterialBlendMode blendMode = MaterialBlendMode::Opaque);
+		MaterialHandle(const ShaderHandle& shader, const UniformInfo& uniformInfo, UniformResources*& resources, MaterialBlendMode blendMode = MaterialBlendMode::Opaque);
+		MaterialHandle(const ShaderHandle& shader, UniformResources*& resources, MaterialBlendMode blendMode = MaterialBlendMode::Opaque);
 
         virtual bool isMaterialBlockHandle() const { return true; }
 
@@ -531,7 +533,7 @@ namespace TTRendering {
 		MaterialBlendMode blendMode() const;
 
         static const MaterialHandle Null;
-        bool operator==(const MaterialHandle& rhs) const { return /*_shader.identifier() == rhs._shader.identifier() &&*/ UniformBlockHandle::operator==(rhs); }
+        bool operator==(const MaterialHandle& rhs) const { return _shader.identifier() == rhs._shader.identifier() && UniformBlockHandle::operator==(rhs); }
         bool operator!=(const MaterialHandle& rhs) const { return !operator==(rhs); }
 	};
 
@@ -656,7 +658,7 @@ namespace TTRendering {
 		virtual ShaderHandle createShader(const std::vector<ShaderStageHandle>& stages) = 0;
 
 		// CPU, 1 created per requested uniform block / material
-		std::vector<UniformBlockHandle::Resources*> materialResources;
+		std::vector<UniformResources*> materialResources;
 
 		static size_t hashMeshLayout(const std::vector<MeshAttribute>& attributes);
 
@@ -711,7 +713,7 @@ namespace TTRendering {
 
 template<> struct std::hash<TTRendering::MaterialHandle> {
     size_t operator()(const TTRendering::MaterialHandle& s) const noexcept {
-        return (size_t)s._resources;
+        return TT::hashCombine(s._shader.identifier(), (size_t)s._resources);
     }
 };
 
