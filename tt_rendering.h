@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <map>
 #include <string>
+#include <algorithm>
 
 #ifndef BEFRIEND_CONTEXTS
 #define BEFRIEND_CONTEXTS friend class RenderingContext; friend class OpenGLContext; friend class VkContext;
@@ -32,7 +33,7 @@ namespace TTRendering {
 		}
 
         void remove(const T& handle) {
-            // Note: we do not remove from handles here because
+            // Note: we do not remove from handles[] here because
             // that would invalidate all indices in identifierToIndex.
             identifierToIndex.erase(handle.identifier());
         }
@@ -64,6 +65,12 @@ namespace TTRendering {
 			keyToIndex[key] = handles.size();
 			handles.push_back(handle);
 		}
+        
+        void remove(const K& key) {
+            // Note: we do not remove from handles[] here because
+            // that would invalidate all indices in keyToIndex.
+            keyToIndex.erase(key);
+        }
 
         const T* find(const K& key) const {
             auto it = keyToIndex.find(key);
@@ -250,12 +257,10 @@ namespace TTRendering {
 	protected:
 		BufferHandle(size_t identifier, size_t size);
 
-	public:
-        // TODO: Do not want.
-        BufferHandle() : HandleBase(0) {}
-
     public:
 		size_t size() const;
+
+        static const BufferHandle Null;
 	};
 
 	enum class PrimitiveType {
@@ -291,16 +296,14 @@ namespace TTRendering {
             size_t numIstances = 0,
             BufferHandle* instanceBuffer = nullptr);
 
-    public:
-        // TODO: Do not want.
-        MeshHandle() : HandleBase(0) {}
-
 	public:
 		const BufferHandle vertexBuffer() const;
 		size_t numElements() const;
 		const BufferHandle* indexBuffer() const;
 		PrimitiveType primitiveType() const;
 		IndexType indexType() const;
+
+        static const MeshHandle Null;
 	};
 
 	enum class ImageFormat {
@@ -326,8 +329,6 @@ namespace TTRendering {
 		ImageInterpolation _interpolation;
 		ImageTiling _tiling;
 
-        // TODO: Do not want public.
-    public:
 		ImageHandle(size_t identifier, ImageFormat format, ImageInterpolation interpolation, ImageTiling tiling);
 
 	public:
@@ -335,6 +336,10 @@ namespace TTRendering {
 		ImageInterpolation interpolation() const;
 		ImageTiling tiling() const;
 		// TODO: generate mip maps?
+
+        static const ImageHandle Null;
+        bool operator==(const ImageHandle& rhs) const { return identifier() == rhs.identifier(); }
+        bool operator!=(const ImageHandle& rhs) const { return !operator==(rhs); }
 	};
 
 	class FramebufferHandle final : public HandleBase {
@@ -343,12 +348,15 @@ namespace TTRendering {
 		std::vector<ImageHandle> _colorAttachments;
 		NullableHandle<ImageHandle> _depthStencilAttachment;
 
-        // TODO: Do not want public.
-    public:
 		FramebufferHandle(size_t identifier, const std::vector<ImageHandle>& colorAttachments, const ImageHandle* depthStencilAttachment);
 
+    public:
         const std::vector<ImageHandle>& colorAttachments() const { return _colorAttachments; }
         const ImageHandle* depthStencilAttachment() const { return _depthStencilAttachment.value(); }
+
+        static const FramebufferHandle Null;
+        bool operator==(const FramebufferHandle& rhs) const { return identifier() == rhs.identifier(); }
+        bool operator!=(const FramebufferHandle& rhs) const { return !operator==(rhs); }
 	};
 
 	class ShaderStageHandle final : public HandleBase {
@@ -373,7 +381,14 @@ namespace TTRendering {
 		ShaderStage stage() const;
 	};
 
-	class ShaderHandle final : public HandleBase { public: ShaderHandle(size_t identifier) : HandleBase(identifier) {} };
+	class ShaderHandle final : public HandleBase { 
+        using HandleBase::HandleBase;
+
+    public: 
+        static const ShaderHandle Null;
+        bool operator==(const ShaderHandle& rhs) const { return identifier() == rhs.identifier(); }
+        bool operator!=(const ShaderHandle& rhs) const { return !operator==(rhs); }
+    };
 
 	enum class UniformType {
 		Unknown,
@@ -407,25 +422,25 @@ namespace TTRendering {
 
 		friend class RenderPass;
 
-		const UniformInfo* _uniformInfo;
-		unsigned char* _uniformBuffer;
-        // TODO: These are not owned by the rendering context,
-        // and therefore copying uniform block handles or material
-        // handles around will break.
-		HandleDict<std::string, ImageHandle> _images;
-		HandleDict<size_t, BufferHandle> _ssbos;
+        const UniformInfo* _uniformInfo;
 
 	protected:
+        struct Resources {
+            unsigned char* uniformBuffer;
+            HandleDict<std::string, ImageHandle> images;
+            HandleDict<size_t, BufferHandle> ssbos;
+        };
+
+        // The context owns the resources, so handles can safely be copied around.
+        Resources* _resources = nullptr;
+        virtual bool isMaterialBlockHandle() const { return false; }
+
 		bool _setUniform(const char* key, void* src, UniformType srcType, unsigned int count = 1);
-		UniformBlockHandle(const UniformInfo& uniformInfo, unsigned char*& uniformBuffer);
+		UniformBlockHandle(const UniformInfo& uniformInfo, Resources*& resources);
+        UniformBlockHandle();
 
 	public:
-		UniformBlockHandle();
-
-        const HandleDict<std::string, ImageHandle>& images() const { return _images; }
-
-        // TODO: Do not want.
-        bool operator<(const UniformBlockHandle& rhs) const { return _uniformBuffer < rhs._uniformBuffer; }
+        const HandleDict<std::string, ImageHandle>& images() const { return _resources->images; }
 
 		size_t size() const;
 		unsigned char* cpuBuffer() const;
@@ -484,6 +499,9 @@ namespace TTRendering {
 
 		bool set(const char* key, const ImageHandle& image);
 		bool set(size_t binding, const BufferHandle& buffer);
+
+        bool operator==(const UniformBlockHandle& rhs) const { return _resources == rhs._resources && isMaterialBlockHandle() == rhs.isMaterialBlockHandle(); }
+        bool operator!=(const UniformBlockHandle& rhs) const { return !operator==(rhs); }
 	};
 
 	enum class MaterialBlendMode {
@@ -498,19 +516,23 @@ namespace TTRendering {
 		BEFRIEND_CONTEXTS;
 
 		friend class RenderPass;
+        friend struct std::hash<TTRendering::MaterialHandle>;
 
 		ShaderHandle _shader;
 		MaterialBlendMode _blendMode;
 
-		MaterialHandle(const ShaderHandle& shader, const UniformInfo& uniformInfo, unsigned char*& uniformBuffer, MaterialBlendMode blendMode = MaterialBlendMode::Opaque);
-
-        // TODO: Do not want public.
-    public:
+		MaterialHandle(const ShaderHandle& shader, const UniformInfo& uniformInfo, Resources*& resources, MaterialBlendMode blendMode = MaterialBlendMode::Opaque);
 		MaterialHandle(const ShaderHandle& shader, MaterialBlendMode blendMode = MaterialBlendMode::Opaque);
+
+        virtual bool isMaterialBlockHandle() const { return true; }
 
 	public:
 		const ShaderHandle& shader() const;
 		MaterialBlendMode blendMode() const;
+
+        static const MaterialHandle Null;
+        bool operator==(const MaterialHandle& rhs) const { return /*_shader.identifier() == rhs._shader.identifier() &&*/ UniformBlockHandle::operator==(rhs); }
+        bool operator!=(const MaterialHandle& rhs) const { return !operator==(rhs); }
 	};
 
 	struct PushConstants {
@@ -633,8 +655,8 @@ namespace TTRendering {
 		virtual ShaderStageHandle createShaderStage(const char* glslFilePath) = 0;
 		virtual ShaderHandle createShader(const std::vector<ShaderStageHandle>& stages) = 0;
 
-		// CPU, 1 per created material
-		std::vector<unsigned char*> materialUniformBuffers;
+		// CPU, 1 created per requested uniform block / material
+		std::vector<UniformBlockHandle::Resources*> materialResources;
 
 		static size_t hashMeshLayout(const std::vector<MeshAttribute>& attributes);
 
@@ -679,12 +701,18 @@ namespace TTRendering {
 		virtual void deleteBuffer(const BufferHandle& buffer) = 0;
 		virtual void deleteMesh(const MeshHandle& mesh) = 0;
 		// virtual void deleteShaderStage(const ShaderStageHandle& mesh) = 0;
-		// virtual void deleteShader(const ShaderHandle& mesh) = 0;
-		// virtual void deleteImage(const ImageHandle& mesh) = 0;
-		// virtual void deleteMaterial(const MaterialHandle& material) = 0;
-		// virtual void deleteUniformBuffer(const UniformBlockHandle& material) = 0;
-		// virtual void deleteFramebuffer(const FramebufferHandle& material) = 0;
+		virtual void deleteShader(const ShaderHandle& mesh) = 0;
+		virtual void deleteImage(const ImageHandle& mesh) = 0;
+		virtual void deleteMaterial(const MaterialHandle& material) = 0;
+		virtual void deleteUniformBuffer(const UniformBlockHandle& material) = 0;
+		virtual void deleteFramebuffer(const FramebufferHandle& material) = 0;
 	};
 }
+
+template<> struct std::hash<TTRendering::MaterialHandle> {
+    size_t operator()(const TTRendering::MaterialHandle& s) const noexcept {
+        return (size_t)s._resources;
+    }
+};
 
 #undef BEFRIEND_CONTEXTS

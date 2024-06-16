@@ -581,19 +581,20 @@ namespace TTRendering {
         if (uniformInfo) {
             // Copy the data into the buffer
             glBindBuffer(GL_UNIFORM_BUFFER, materialUbo);
-            TT::assert(material._uniformBuffer != nullptr);
+            TT::assert(material._resources != nullptr && material._resources->uniformBuffer != nullptr);
             TT::assert(uniformInfo->bufferSize <= materialUboSize);
-            glBufferSubData(GL_UNIFORM_BUFFER, 0, uniformInfo->bufferSize, material._uniformBuffer);
+            glBufferSubData(GL_UNIFORM_BUFFER, 0, uniformInfo->bufferSize, material._resources->uniformBuffer);
             // Map only the used portion of the buffer
             glBindBufferRange(GL_UNIFORM_BUFFER, (GLuint)UniformBlockSemantics::Material, materialUbo, 0, uniformInfo->bufferSize);
         }
     }
 
     void OpenGLContext::bindMaterialImages(const MaterialHandle& material, size_t shaderIdentifier) const {
+        if (material._resources == nullptr) return;
         unsigned int activeImage = 0;
-        for(const auto& pair : material._images) {
+        for(const auto& pair : material._resources->images) {
             glActiveTexture(GL_TEXTURE0 + activeImage);
-            glBindTexture(GL_TEXTURE_2D, (GLuint)material._images.handle(pair.second).identifier()); TT_GL_DBG_ERR;
+            glBindTexture(GL_TEXTURE_2D, (GLuint)material._resources->images.handle(pair.second).identifier()); TT_GL_DBG_ERR;
             GLint loc = glGetUniformLocation((GLuint)shaderIdentifier, pair.first.data());
             glUniform1i(loc, activeImage);
             ++activeImage;
@@ -601,8 +602,9 @@ namespace TTRendering {
     }
 
     void OpenGLContext::bindMaterialSSBOs(const MaterialHandle& material) const {
-        for(const auto& pair : material._ssbos) {
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, (GLuint)pair.first, (GLuint)material._ssbos.handle(pair.second).identifier());
+        if (material._resources == nullptr) return;
+        for(const auto& pair : material._resources->ssbos) {
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, (GLuint)pair.first, (GLuint)material._resources->ssbos.handle(pair.second).identifier());
         }
     }
 
@@ -743,4 +745,40 @@ namespace TTRendering {
 		glDeleteVertexArrays(1, &handle);
         meshes.remove(mesh);
 	}
+
+    /*void OpenGLContext::deleteShaderStage(const ShaderStageHandle& stage) {
+        shaderStagePool.remove(stage);
+        glDeleteShader((GLuint)stage.identifier());
+    }*/
+
+    void OpenGLContext::deleteShader(const ShaderHandle& shader) {
+        shaderPool.remove(shader.identifier());
+        shaderUniformInfo.erase(shader.identifier());
+        glDeleteProgram((GLuint)shader.identifier());
+    }
+
+    void OpenGLContext::deleteImage(const ImageHandle& image) {
+        GLuint handle = (GLuint)image.identifier();
+        glDeleteTextures(1, &handle);
+    }
+
+    void OpenGLContext::deleteMaterial(const MaterialHandle& material) {
+        auto it = std::find(materialResources.begin(), materialResources.end(), material._resources);
+        TT::assert(it != materialResources.end());
+        if(it != materialResources.end())
+            materialResources.erase(it);
+    }
+
+    void OpenGLContext::deleteUniformBuffer(const UniformBlockHandle& uniformBuffer) {
+        auto it = std::find(materialResources.begin(), materialResources.end(), uniformBuffer._resources);
+        TT::assert(it != materialResources.end());
+        if(it != materialResources.end())
+            materialResources.erase(it);
+    }
+
+    void OpenGLContext::deleteFramebuffer(const FramebufferHandle& frameBuffer) {
+        GLuint handle = (GLuint)frameBuffer.identifier();
+        glDeleteFramebuffers(1, &handle);
+    }
+
 }
