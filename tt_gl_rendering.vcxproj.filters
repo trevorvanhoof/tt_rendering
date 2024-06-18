@@ -66,6 +66,9 @@
     <ClCompile Include="tt_rendering.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="tt_meshloader.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="gl\tt_gl.h">
@@ -103,6 +106,9 @@
     </ClInclude>
     <ClInclude Include="gl\tt_gl_rendering_fontstash.h">
       <Filter>Header Files\gl</Filter>
+    </ClInclude>
+    <ClInclude Include="tt_meshloader.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

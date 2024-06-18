@@ -15,18 +15,18 @@ namespace TTRendering {
         void bindMaterialImages(const MaterialHandle& material, size_t shaderIdentifier) const;
         void bindMaterialSSBOs(const MaterialHandle& material) const;
 
-    // public: // TODO: hacks for font rendering, it should probably be implemented by pooling as many meshes as are needed per frame instead
         const UniformInfo* useAndPrepareShader(size_t shaderIdentifier) const;
         void bindMaterialResources(const UniformInfo* uniformInfo, const MaterialHandle& material, size_t shaderIdentifier) const;
-        // void bindFramebuffer(const TTRendering::FramebufferHandle* framebuffer);
 
 		ShaderStageHandle createShaderStage(const char* glslFilePath) override;
 		ShaderHandle createShader(const std::vector<ShaderStageHandle>& stages) override;
 
 	public:
-        // TODO: This is useful when running in another framework, but it means beginFrame and endFrame do not work.
+        // This is useful when running in another framework, but it means beginFrame and endFrame do not work.
 		OpenGLContext();
+
 		OpenGLContext(const TT::Window& window);
+
 		void beginFrame() override;
 		void endFrame() override;
 
@@ -50,5 +50,11 @@ namespace TTRendering {
         void dispatchCompute(const MaterialHandle& material, unsigned int x = 1, unsigned int y = 1, unsigned int z = 1) override;
         void deleteBuffer(const BufferHandle& buffer) override;
         void deleteMesh(const MeshHandle& mesh) override;
+        // void deleteShaderStage(const ShaderStageHandle& mesh) override;
+        void deleteShader(const ShaderHandle& mesh) override;
+        void deleteImage(const ImageHandle& mesh) override;
+        void deleteMaterial(const MaterialHandle& material) override;
+        void deleteUniformBuffer(const UniformBlockHandle& material) override;
+        void deleteFramebuffer(const FramebufferHandle& material) override;
 	};
 }

@@ -17,7 +17,7 @@ namespace TTRendering {
 		PrimitiveType primitiveType,
 		IndexType indexType,
 		BufferHandle* indexBuffer,
-        size_t numIstances,
+        size_t numInstances,
         BufferHandle* instanceBuffer) :
 		HandleBase(identifier),
         _meshLayoutHash(meshLayoutHash),
@@ -26,7 +26,7 @@ namespace TTRendering {
 		_primitiveType(primitiveType),
 		_indexType(indexType),
         _indexBuffer(indexBuffer),
-        _numIstances(numIstances),
+        _numInstances(numInstances),
         _instanceBuffer(instanceBuffer) {}
 	const BufferHandle MeshHandle::vertexBuffer() const { return _vertexBuffer; }
 	size_t MeshHandle::numElements() const { return _numElements; }
@@ -122,20 +122,20 @@ namespace TTRendering {
 			return false;
         if(info->arraySize != count)
             return false;
-		memcpy(_uniformBuffer + info->offset, src, sizeOfUniformType(srcType));
+		memcpy(_resources->uniformBuffer + info->offset, src, sizeOfUniformType(srcType));
 		return true;
 	}
 
-	UniformBlockHandle::UniformBlockHandle(const UniformInfo& uniformInfo, unsigned char*& uniformBuffer) :
-		_uniformInfo(&uniformInfo), _uniformBuffer(uniformBuffer) {
+	UniformBlockHandle::UniformBlockHandle(const UniformInfo& uniformInfo, UniformResources*& resources) :
+		_uniformInfo(&uniformInfo), _resources(resources) {
 	}
 
-	UniformBlockHandle::UniformBlockHandle() :
-		_uniformInfo(nullptr), _uniformBuffer(nullptr) {
+	UniformBlockHandle::UniformBlockHandle(UniformResources*& resources) :
+		_uniformInfo(nullptr), _resources(resources) {
 	}
 
 	size_t UniformBlockHandle::size() const { return _uniformInfo ? _uniformInfo->bufferSize : 0; }
-	unsigned char* UniformBlockHandle::cpuBuffer() const { return _uniformBuffer; }
+	unsigned char* UniformBlockHandle::cpuBuffer() const { return _resources->uniformBuffer; }
 
 	bool UniformBlockHandle::hasUniformBlock() const { return _uniformInfo != nullptr; }
 
@@ -196,20 +196,22 @@ namespace TTRendering {
 	bool UniformBlockHandle::setBVec4(const char* key, int* value, unsigned int count) { return _setUniform(key, value, UniformType::BVec4, count); }
 
     bool UniformBlockHandle::set(const char* key, const ImageHandle& image) { 
-        _images.insert(key, image);
+        if (!_resources) return false;
+        _resources->images.insert(key, image);
         return true;
     }
 
     bool UniformBlockHandle::set(size_t binding, const BufferHandle& buffer) {
-        _ssbos.insert(binding, buffer);
+        if (!_resources) return false;
+        _resources->ssbos.insert(binding, buffer);
         return true;
     }
 
-	MaterialHandle::MaterialHandle(const ShaderHandle& shader, const UniformInfo& uniformInfo, unsigned char*& uniformBuffer, MaterialBlendMode blendMode) :
-		UniformBlockHandle(uniformInfo, uniformBuffer), _shader(shader), _blendMode(blendMode) {
+	MaterialHandle::MaterialHandle(const ShaderHandle& shader, const UniformInfo& uniformInfo, UniformResources*& resources, MaterialBlendMode blendMode) :
+		UniformBlockHandle(uniformInfo, resources), _shader(shader), _blendMode(blendMode) {
 	}
 
-	MaterialHandle::MaterialHandle(const ShaderHandle& shader, MaterialBlendMode blendMode) : UniformBlockHandle(), _shader(shader), _blendMode(blendMode) {}
+	MaterialHandle::MaterialHandle(const ShaderHandle& shader, UniformResources*& resources, MaterialBlendMode blendMode) : UniformBlockHandle(resources), _shader(shader), _blendMode(blendMode) {}
 
 	const ShaderHandle& MaterialHandle::shader() const { return _shader; }
 	
@@ -268,18 +270,18 @@ namespace TTRendering {
 	}
 
 	void RenderPass::setFramebuffer(FramebufferHandle handle) {
-		framebuffer.set(handle);
+		_framebuffer.set(handle);
 		modified = true;
 	}
 
 	void RenderPass::clearFramebuffer() {
-		framebuffer.clear();
+        _framebuffer.clear();
 		modified = true;
 	}
 
     RenderEntry RenderPass::addToDrawQueue(const MeshHandle& mesh, const MaterialHandle& material, const PushConstants* pushConstants, size_t instanceCount) {
         RenderEntry result;
-        auto& queue = drawQueue
+        auto& queue = _drawQueue
             .fetch(mesh._meshLayoutHash, result.meshLayoutQueueIndex)
             .fetch(material._shader.identifier(), result.shaderQueueIndex)
             .fetch(material, result.materialQueueIndex);
@@ -293,14 +295,14 @@ namespace TTRendering {
     }
 
     void RenderPass::removeFromDrawQueue(const RenderEntry& entry) {
-        drawQueue.queues[entry.meshLayoutQueueIndex].queues[entry.shaderQueueIndex].queues[entry.materialQueueIndex].orderedQueue.erase(entry.meshIndex);
+        _drawQueue.queues[entry.meshLayoutQueueIndex].queues[entry.shaderQueueIndex].queues[entry.materialQueueIndex].orderedQueue.erase(entry.meshIndex);
         modified = true;
     }
 
     void RenderPass::emptyQueue() {
-        drawQueue.meshLayoutHashToQueueIndex.clear();
-        drawQueue.keys.clear();
-        drawQueue.queues.clear();
+        _drawQueue.meshLayoutHashToQueueIndex.clear();
+        _drawQueue.keys.clear();
+        _drawQueue.queues.clear();
         modified = true;
     }
 
@@ -352,10 +354,11 @@ namespace TTRendering {
 		const std::unordered_map<int, UniformInfo>& info = shaderUniformInfo.find(shader.identifier())->second;
 		auto it = info.find((int)UniformBlockSemantics::Material);
 		if (it != info.end()) {
-			materialUniformBuffers.push_back(new unsigned char[it->second.bufferSize]);
-			return MaterialHandle(shader, it->second, materialUniformBuffers.back(), blendMode);
+            materialResources.push_back(new UniformResources {new unsigned char[it->second.bufferSize], {}, {} });
+			return MaterialHandle(shader, it->second, materialResources.back(), blendMode);
 		}
-		return MaterialHandle(shader, blendMode);
+        materialResources.push_back(new UniformResources {nullptr, {}, {} });
+		return MaterialHandle(shader, materialResources.back(), blendMode);
 	}
 
 	UniformBlockHandle RenderingContext::createUniformBuffer(const ShaderHandle& shader, const UniformBlockSemantics& semantic) {
@@ -365,10 +368,11 @@ namespace TTRendering {
 		const std::unordered_map<int, UniformInfo>& info = shaderUniformInfo.find(shader.identifier())->second;
 		auto it = info.find((int)semantic);
 		if (it != info.end()) {
-			materialUniformBuffers.push_back(new unsigned char[it->second.bufferSize]);
-			return UniformBlockHandle(it->second, materialUniformBuffers.back());
+            materialResources.push_back(new UniformResources { new unsigned char[it->second.bufferSize], {}, {} });
+			return UniformBlockHandle(it->second, materialResources.back());
 		}
-		return UniformBlockHandle();
+        materialResources.push_back(new UniformResources {nullptr, {}, {} });
+		return UniformBlockHandle(materialResources.back());
 	}
 
 	ShaderStageHandle RenderingContext::fetchShaderStage(const char* glslFilePath) {
@@ -400,4 +404,12 @@ namespace TTRendering {
 		stbi_image_free(data);
 		return { r };
 	}
+
+    const BufferHandle BufferHandle::Null(0, 0);
+    const MeshHandle MeshHandle::Null(0, 0, BufferHandle::Null, 0, PrimitiveType::Line, IndexType::None);
+    const ImageHandle ImageHandle::Null(0, TTRendering::ImageFormat::RGBA32F, TTRendering::ImageInterpolation::Linear, TTRendering::ImageTiling::Clamp);
+    const FramebufferHandle FramebufferHandle::Null(0, {}, nullptr);
+    const ShaderHandle ShaderHandle::Null(0);
+    namespace { UniformResources* _NullResource = nullptr; }
+    const MaterialHandle MaterialHandle::Null(ShaderHandle::Null, _NullResource);
 }

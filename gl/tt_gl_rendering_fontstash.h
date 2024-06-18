@@ -67,7 +67,8 @@ namespace {
 	}
 
 	void _renderDelete(void* userPtr) {
-        // TODO: not supported yet
+        FonsGLContext& context = *((FonsGLContext*)userPtr);
+        context.context->deleteImage(context.image);
 	}
 }
 
