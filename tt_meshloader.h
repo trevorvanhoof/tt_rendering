@@ -10,19 +10,21 @@
 #include "../tt_cpplib/tt_files.h"
 
 namespace TT {
-    class FbxScene {
-        std::vector<MultiMeshData> meshes;
-        std::vector<Node> nodes;
+    class FbxExtractor {
+        std::vector<MultiMeshData> _meshes;
+        std::vector<Node> _nodes;
 
-        FbxScene(const FbxScene&) = delete;
-        FbxScene(FbxScene&&) = delete;
-        FbxScene& operator=(const FbxScene&) = delete;
-        FbxScene& operator=(FbxScene&&) = delete;
+        FbxExtractor(const FbxExtractor&) = delete;
+        FbxExtractor(FbxExtractor&&) = delete;
+        FbxExtractor& operator=(const FbxExtractor&) = delete;
+        FbxExtractor& operator=(FbxExtractor&&) = delete;
 
     public:
-        ~FbxScene();
-        FbxScene(const std::string_view filePath, FbxAxisSystem::EUpVector up = FbxAxisSystem::eYAxis, FbxAxisSystem::EFrontVector front = FbxAxisSystem::eParityOdd, FbxAxisSystem::ECoordSystem flip = FbxAxisSystem::eRightHanded, Units unit = Units::m);
-        void SaveToCache(const std::string_view filePath) const;
-        bool LoadFromCache(const std::string_view filePath);
+        ~FbxExtractor();
+        FbxExtractor(const std::string_view filePath, /*FbxAxisSystem::EUpVector*/int up = 2, /*FbxAxisSystem::EFrontVector*/ int front = 2, /*FbxAxisSystem::ECoordSystem*/ int flip = 0, Units unit = Units::m);
+        void saveToCache(const std::string_view filePath) const;
+        bool loadFromCache(const std::string_view filePath);
+        const std::vector<MultiMeshData>& meshes() const { return _meshes; }
+        const std::vector<Node>& nodes() const { return _nodes; }
     };
 }

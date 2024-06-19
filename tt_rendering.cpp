@@ -2,6 +2,9 @@
 
 #include "../../tt_cpplib/tt_messages.h"
 #include "stb/stb_image.h"
+#include "tt_meshloader.h"
+
+#include <filesystem>
 
 namespace TTRendering {
 	HandleBase::HandleBase(size_t identifier) : _identifier(identifier) {}
@@ -15,7 +18,6 @@ namespace TTRendering {
 		BufferHandle vertexBuffer,
 		size_t numElements,
 		PrimitiveType primitiveType,
-		IndexType indexType,
 		BufferHandle* indexBuffer,
         size_t numInstances,
         BufferHandle* instanceBuffer) :
@@ -24,13 +26,33 @@ namespace TTRendering {
 		_vertexBuffer(vertexBuffer),
 		_numElements(numElements),
 		_primitiveType(primitiveType),
-		_indexType(indexType),
-        _indexBuffer(indexBuffer),
-        _numInstances(numInstances),
-        _instanceBuffer(instanceBuffer) {}
+        _numInstances(numInstances) {
+
+        if (indexBuffer) _indexBuffer = *indexBuffer;
+        if (instanceBuffer) _instanceBuffer = *instanceBuffer;
+
+        _indexType = IndexType::None;
+        if(indexBuffer) {
+            size_t indexElementSize = indexBuffer->size() / numElements;
+            switch(indexElementSize) {
+            case 1:
+                _indexType = IndexType::U8;
+                break;
+            case 2:
+                _indexType = IndexType::U16;
+                break;
+            case 4:
+                _indexType = IndexType::U32;
+                break;
+            default:
+                TT::assert(false);
+                break;
+            }
+        }
+    }
 	const BufferHandle MeshHandle::vertexBuffer() const { return _vertexBuffer; }
 	size_t MeshHandle::numElements() const { return _numElements; }
-	const BufferHandle* MeshHandle::indexBuffer() const { return _indexBuffer.value(); }
+    const BufferHandle* MeshHandle::indexBuffer() const { return _indexBuffer == BufferHandle::Null ? nullptr : &_indexBuffer; }
 	PrimitiveType MeshHandle::primitiveType() const { return _primitiveType; }
 	IndexType MeshHandle::indexType() const { return _indexType; }
 
@@ -42,7 +64,7 @@ namespace TTRendering {
 	FramebufferHandle::FramebufferHandle(size_t identifier, const std::vector<ImageHandle>& colorAttachments, const ImageHandle* depthStencilAttachment) :
 		HandleBase(identifier), _colorAttachments(colorAttachments) {
 		if (depthStencilAttachment)
-			_depthStencilAttachment.set(*depthStencilAttachment);
+			_depthStencilAttachment = *depthStencilAttachment;
 	}
 
 	ShaderStageHandle::ShaderStageHandle(size_t identifier, ShaderStage stage) : 
@@ -126,16 +148,16 @@ namespace TTRendering {
 		return true;
 	}
 
-	UniformBlockHandle::UniformBlockHandle(const UniformInfo& uniformInfo, UniformResources*& resources) :
+	UniformBlockHandle::UniformBlockHandle(const UniformInfo& uniformInfo, UniformResources* resources) :
 		_uniformInfo(&uniformInfo), _resources(resources) {
 	}
 
-	UniformBlockHandle::UniformBlockHandle(UniformResources*& resources) :
+	UniformBlockHandle::UniformBlockHandle(UniformResources* resources) :
 		_uniformInfo(nullptr), _resources(resources) {
 	}
 
 	size_t UniformBlockHandle::size() const { return _uniformInfo ? _uniformInfo->bufferSize : 0; }
-	unsigned char* UniformBlockHandle::cpuBuffer() const { return _resources->uniformBuffer; }
+    unsigned char* UniformBlockHandle::cpuBuffer() const { if (!_resources) return nullptr; return _resources->uniformBuffer; }
 
 	bool UniformBlockHandle::hasUniformBlock() const { return _uniformInfo != nullptr; }
 
@@ -207,11 +229,11 @@ namespace TTRendering {
         return true;
     }
 
-	MaterialHandle::MaterialHandle(const ShaderHandle& shader, const UniformInfo& uniformInfo, UniformResources*& resources, MaterialBlendMode blendMode) :
+	MaterialHandle::MaterialHandle(const ShaderHandle& shader, const UniformInfo& uniformInfo, UniformResources* resources, MaterialBlendMode blendMode) :
 		UniformBlockHandle(uniformInfo, resources), _shader(shader), _blendMode(blendMode) {
 	}
 
-	MaterialHandle::MaterialHandle(const ShaderHandle& shader, UniformResources*& resources, MaterialBlendMode blendMode) : UniformBlockHandle(resources), _shader(shader), _blendMode(blendMode) {}
+	MaterialHandle::MaterialHandle(const ShaderHandle& shader, UniformResources* resources, MaterialBlendMode blendMode) : UniformBlockHandle(resources), _shader(shader), _blendMode(blendMode) {}
 
 	const ShaderHandle& MaterialHandle::shader() const { return _shader; }
 	
@@ -260,22 +282,22 @@ namespace TTRendering {
 	}
 
 	void RenderPass::setPassUniforms(UniformBlockHandle handle) {
-		passUniforms.set(handle);
+		passUniforms = handle;
 		modified = true;
 	}
 
 	void RenderPass::clearPassUniforms() {
-		passUniforms.clear();
+        passUniforms = UniformBlockHandle::Null;
 		modified = true;
 	}
 
 	void RenderPass::setFramebuffer(FramebufferHandle handle) {
-		_framebuffer.set(handle);
+		_framebuffer = handle;
 		modified = true;
 	}
 
 	void RenderPass::clearFramebuffer() {
-        _framebuffer.clear();
+        _framebuffer = FramebufferHandle::Null;
 		modified = true;
 	}
 
@@ -389,7 +411,7 @@ namespace TTRendering {
 		return registerShader(hash, shader, getUniformBlocks(shader, stages));
 	}
 
-	NullableHandle<ImageHandle> RenderingContext::loadImage(const char* filePath, ImageInterpolation interpolation, ImageTiling tiling) {
+	ImageHandle RenderingContext::loadImage(const char* filePath, ImageInterpolation interpolation, ImageTiling tiling) {
 		int width, height, channels;
 		unsigned char* data = stbi_load(filePath, &width, &height, &channels, 0);
 		ImageFormat format;
@@ -398,18 +420,134 @@ namespace TTRendering {
 		case 2: format = ImageFormat::RG8; break;
 		case 3: format = ImageFormat::RGB8; break;
 		case 4: format = ImageFormat::RGBA8; break;
-		default: TT::error("Invalid image: %s", filePath); return {};
+        default: TT::error("Invalid image: %s", filePath); return ImageHandle::Null;
 		}
 		ImageHandle r = createImage(width, height, format, interpolation, tiling, data);
 		stbi_image_free(data);
 		return { r };
 	}
 
+    MeshFileInfo RenderingContext::loadMesh(const char* fbxFilePath) {
+        TT::FbxExtractor scene(fbxFilePath);
+
+        // Bidirectional LUT to go from mesh handle to material and back
+        MeshFileInfo result;
+        std::vector<std::vector<MeshHandle>> subMeshesByMaterialId;
+        // To save space we push material names into this vector
+        std::vector<std::string> materialNames;
+
+        
+        // To speed up the internal check of known material names we can use a map
+        std::unordered_map<std::string, size_t> materialNameToId;
+        // To redirect transform mesh indices to (valid) meshes we need this internal map
+        std::unordered_map<size_t, std::vector<std::pair<size_t, size_t>>> multiMeshToSubMeshIndices;
+
+        // Upload meshes
+        for (size_t j = 0; j < scene.meshes().size(); ++j) {
+            const auto& mesh = scene.meshes()[j];
+            if (!mesh.attributeCount || !mesh.meshCount) continue;
+
+            std::vector<MeshAttribute> layout;
+            unsigned int vertexStride = 0;
+            for(unsigned int i = 0; i < mesh.attributeCount;++i) {
+                if (mesh.attributeLayout[i].numElements == NumElements::Invalid) continue;
+                MeshAttribute entry;
+                entry.location = (unsigned char)mesh.attributeLayout[i].semantic;
+                entry.dimensions = (MeshAttribute::Dimensions)((unsigned char)mesh.attributeLayout[i].numElements - 1);
+                switch(mesh.attributeLayout[i].elementType) {
+                case ElementType::UInt32:
+                    entry.elementType = MeshAttribute::ElementType::U32;
+                    break;
+                case ElementType::Float:
+                    entry.elementType = MeshAttribute::ElementType::F32;
+                    break;
+                default:
+                    TT::assert(false);
+                    continue;
+                }
+                layout.push_back(entry);
+                vertexStride += 4 * (unsigned int)mesh.attributeLayout[i].numElements;
+            }
+            if(vertexStride == 0) {
+                TT::assert(false);
+                continue;
+            }
+            
+            std::vector<std::pair<size_t, size_t>> uploadedMeshIndices;
+            for(unsigned int i = 0; i < mesh.meshCount; ++i) {
+                const auto& subMesh = mesh.meshes[i];
+                if(subMesh.materialId >= mesh.materialNameCount) {
+                    TT::assert(false);
+                    continue;
+                }
+                auto vbo = createBuffer(subMesh.vertexDataSizeInBytes, subMesh.vertexDataBlob);
+                MeshHandle gpuMesh = MeshHandle::Null;
+                if(subMesh.indexDataSizeInBytes) {
+                    auto ibo = createBuffer(subMesh.indexDataSizeInBytes, subMesh.indexDataBlob);
+                    gpuMesh = createMesh(subMesh.indexDataSizeInBytes / mesh.indexElementSizeInBytes, vbo, layout, &ibo);
+                } else {
+                    gpuMesh = createMesh(subMesh.vertexDataSizeInBytes / vertexStride, vbo, layout);
+                }
+
+                std::string materialName(mesh.materialNames[subMesh.materialId].buffer, mesh.materialNames[subMesh.materialId].length);
+                const auto& it = materialNameToId.find(materialName);
+                size_t materialId;
+                if (it == materialNameToId.end()) {
+                    materialNameToId[materialName] = materialNames.size();
+                    materialId = materialNames.size();
+                    materialNames.push_back(materialName);
+                    subMeshesByMaterialId.emplace_back();
+                } else {
+                    materialId = it->second;
+                }
+
+                uploadedMeshIndices.push_back({materialId, subMeshesByMaterialId[materialId].size()});
+                subMeshesByMaterialId[materialId].push_back(gpuMesh);
+            }
+
+            if (uploadedMeshIndices.size() == 0) continue;
+            multiMeshToSubMeshIndices[j] = uploadedMeshIndices;
+        }
+
+        // Convert nodes
+        const auto& nodes = scene.nodes();
+        std::vector<TransformInfo> transforms(nodes.size());
+        for(size_t i = 0 ;i < nodes.size(); ++i) {
+            const auto& node = nodes[i];
+            
+            if (node.parentIndex != -1)
+                transforms[i].parent = &transforms[node.parentIndex];
+            else
+                transforms[i].parent = nullptr;
+            
+            const auto& it = multiMeshToSubMeshIndices.find(nodes[i].meshIndex);
+            if (it != multiMeshToSubMeshIndices.end())
+                transforms[i].meshIndices = it->second;
+            else
+                transforms[i].meshIndices = {};
+
+            transforms[i].translate.x = (float)node.translateX;
+            transforms[i].translate.y = (float)node.translateY;
+            transforms[i].translate.z = (float)node.translateZ;
+            transforms[i].radians.x = (float)node.rotateX;
+            transforms[i].radians.y = (float)node.rotateY;
+            transforms[i].radians.z = (float)node.rotateZ;
+            transforms[i].scale.x = (float)node.scaleX;
+            transforms[i].scale.y = (float)node.scaleY;
+            transforms[i].scale.z = (float)node.scaleZ;
+
+            // TODO: Verify this is not reversed, i.e. my XYZ is not their ZYX. Since I already remap during extraction we can easily fix that in the rotateOrderInts table in the extractor.
+            transforms[i].rotateOrder = (TT::ERotateOrder)node.rotateOrder;
+        }
+
+        return { subMeshesByMaterialId, transforms, materialNames };
+    }
+
     const BufferHandle BufferHandle::Null(0, 0);
-    const MeshHandle MeshHandle::Null(0, 0, BufferHandle::Null, 0, PrimitiveType::Line, IndexType::None);
+    const MeshHandle MeshHandle::Null(0, 0, BufferHandle::Null, 0, PrimitiveType::Line);
     const ImageHandle ImageHandle::Null(0, TTRendering::ImageFormat::RGBA32F, TTRendering::ImageInterpolation::Linear, TTRendering::ImageTiling::Clamp);
     const FramebufferHandle FramebufferHandle::Null(0, {}, nullptr);
     const ShaderHandle ShaderHandle::Null(0);
-    namespace { UniformResources* _NullResource = nullptr; }
-    const MaterialHandle MaterialHandle::Null(ShaderHandle::Null, _NullResource);
+    const MaterialHandle MaterialHandle::Null(ShaderHandle::Null, nullptr);
+    const UniformBlockHandle UniformBlockHandle::Null(nullptr);
 }

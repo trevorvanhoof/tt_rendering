@@ -95,102 +95,6 @@ namespace TTRendering {
 			return *find(key);
 		}
 	};
-
-	template<typename T>
-	class NullableHandle {
-		bool _empty = true;
-		unsigned char* _handle;
-
-	public:
-		NullableHandle() {
-			_handle = new unsigned char[sizeof(T)];
-		}
-
-        NullableHandle(const T& handle) {
-            _handle = new unsigned char[sizeof(T)];
-            set(handle);
-        }
-
-        NullableHandle(const T* handle) {
-            _handle = new unsigned char[sizeof(T)];
-            if(handle != nullptr) set(*handle);
-        }
-
-		~NullableHandle() {
-			delete _handle;
-		}
-
-		NullableHandle(const NullableHandle& rhs) : NullableHandle() {
-			if (!rhs.isEmpty())
-				set(*rhs.value());
-		}
-
-		NullableHandle& operator=(const NullableHandle& rhs) {
-			if (!rhs.isEmpty())
-				set(*rhs.value());
-			else
-				clear();
-			return *this;
-		}
-
-		NullableHandle(NullableHandle&& rhs) = delete;
-		NullableHandle& operator=(NullableHandle&& rhs) = delete;
-
-		bool isEmpty() const {
-			return _empty;
-		}
-
-		void clear() {
-			if (!_empty)
-				((T*)_handle)->~T();
-			_empty = true;
-		}
-
-		void set(const T& handle) {
-			new(_handle) T(handle);
-			_empty = false;
-		}
-
-		const T* value() const {
-			return _empty ? nullptr : (const T*)_handle;
-		}
-
-		T* value() {
-			return _empty ? nullptr : (T*)_handle;
-		}
-
-        const T* operator->() const {
-            TT::assertFatal(!_empty);
-            return (const T*)_handle;
-        }
-
-        T* operator->() {
-            TT::assertFatal(!_empty);
-            return (T*)_handle;
-        }
-
-        const T& operator*() const {
-            TT::assertFatal(!_empty);
-            return *(const T*)_handle;
-        }
-
-        T& operator*() {
-            TT::assertFatal(!_empty);
-            return *(T*)_handle;
-        }
-
-        operator T*() {
-            return value();
-        }
-
-        void operator=(const T& rhs) {
-            set(rhs);
-        }
-
-        operator bool() const {
-            return !_empty;
-        }
-	};
 }
 
 namespace TTRendering {
@@ -261,6 +165,8 @@ namespace TTRendering {
 		size_t size() const;
 
         static const BufferHandle Null;
+        bool operator==(const BufferHandle& rhs) const { return identifier() == rhs.identifier(); }
+        bool operator!=(const BufferHandle& rhs) const { return !operator==(rhs); }
 	};
 
 	enum class PrimitiveType {
@@ -281,9 +187,9 @@ namespace TTRendering {
 		size_t _numElements; // num indices if ibo != nullptr, else num vertices
 		PrimitiveType _primitiveType;
 		IndexType _indexType;
-		NullableHandle<BufferHandle> _indexBuffer;
+        BufferHandle _indexBuffer = BufferHandle::Null;
         size_t _numInstances;
-		NullableHandle<BufferHandle> _instanceBuffer;
+		BufferHandle _instanceBuffer = BufferHandle::Null;
 
 		MeshHandle(
             size_t identifier,
@@ -291,7 +197,6 @@ namespace TTRendering {
 			BufferHandle vertexBuffer,
 			size_t numElements,
 			PrimitiveType primitiveType,
-			IndexType indexType,
 			BufferHandle* indexBuffer = nullptr,
             size_t numIstances = 0,
             BufferHandle* instanceBuffer = nullptr);
@@ -304,6 +209,8 @@ namespace TTRendering {
 		IndexType indexType() const;
 
         static const MeshHandle Null;
+        bool operator==(const MeshHandle& rhs) const { return identifier() == rhs.identifier(); }
+        bool operator!=(const MeshHandle& rhs) const { return !operator==(rhs); }
 	};
 
 	enum class ImageFormat {
@@ -346,13 +253,13 @@ namespace TTRendering {
 		BEFRIEND_CONTEXTS;
 
 		std::vector<ImageHandle> _colorAttachments;
-		NullableHandle<ImageHandle> _depthStencilAttachment;
+		ImageHandle _depthStencilAttachment = ImageHandle::Null;
 
 		FramebufferHandle(size_t identifier, const std::vector<ImageHandle>& colorAttachments, const ImageHandle* depthStencilAttachment);
 
     public:
         const std::vector<ImageHandle>& colorAttachments() const { return _colorAttachments; }
-        const ImageHandle* depthStencilAttachment() const { return _depthStencilAttachment.value(); }
+        const ImageHandle* depthStencilAttachment() const {  return (_depthStencilAttachment == ImageHandle::Null) ? nullptr : &_depthStencilAttachment; }
 
         static const FramebufferHandle Null;
         bool operator==(const FramebufferHandle& rhs) const { return identifier() == rhs.identifier(); }
@@ -373,8 +280,6 @@ namespace TTRendering {
 
 		ShaderStage _stage;
 
-        // TODO: Do not want public.
-    public:
 		ShaderStageHandle(size_t identifier, ShaderStage stage);
 
 	public:
@@ -438,8 +343,8 @@ namespace TTRendering {
         virtual bool isMaterialBlockHandle() const { return false; }
 
 		bool _setUniform(const char* key, void* src, UniformType srcType, unsigned int count = 1);
-		UniformBlockHandle(const UniformInfo& uniformInfo, UniformResources*& resources);
-		UniformBlockHandle(UniformResources*& resources);
+		UniformBlockHandle(const UniformInfo& uniformInfo, UniformResources* resources);
+		UniformBlockHandle(UniformResources* resources);
 
 	public:
         const HandleDict<std::string, ImageHandle>& images() const { return _resources->images; }
@@ -502,6 +407,7 @@ namespace TTRendering {
 		bool set(const char* key, const ImageHandle& image);
 		bool set(size_t binding, const BufferHandle& buffer);
 
+        static const UniformBlockHandle Null;
         bool operator==(const UniformBlockHandle& rhs) const { return _resources == rhs._resources && isMaterialBlockHandle() == rhs.isMaterialBlockHandle(); }
         bool operator!=(const UniformBlockHandle& rhs) const { return !operator==(rhs); }
 	};
@@ -523,8 +429,8 @@ namespace TTRendering {
 		ShaderHandle _shader;
 		MaterialBlendMode _blendMode;
 
-		MaterialHandle(const ShaderHandle& shader, const UniformInfo& uniformInfo, UniformResources*& resources, MaterialBlendMode blendMode = MaterialBlendMode::Opaque);
-		MaterialHandle(const ShaderHandle& shader, UniformResources*& resources, MaterialBlendMode blendMode = MaterialBlendMode::Opaque);
+		MaterialHandle(const ShaderHandle& shader, const UniformInfo& uniformInfo, UniformResources* resources, MaterialBlendMode blendMode = MaterialBlendMode::Opaque);
+		MaterialHandle(const ShaderHandle& shader, UniformResources* resources, MaterialBlendMode blendMode = MaterialBlendMode::Opaque);
 
         virtual bool isMaterialBlockHandle() const { return true; }
 
@@ -544,10 +450,10 @@ namespace TTRendering {
 	};
 
     struct RenderEntry {
-        size_t shaderQueueIndex = -1;
-        size_t materialQueueIndex = -1;
-        size_t meshLayoutQueueIndex = -1;
-        size_t meshIndex = -1;
+        size_t shaderQueueIndex = (size_t)-1;
+        size_t materialQueueIndex = (size_t)-1;
+        size_t meshLayoutQueueIndex = (size_t)-1;
+        size_t meshIndex = (size_t)-1;
 
 		bool isNull() {
 			// We dive into a tree to build this so we only need to check the last one.
@@ -603,12 +509,12 @@ namespace TTRendering {
 
 		DrawQueue _drawQueue;
 
-		NullableHandle<UniformBlockHandle> passUniforms; // empty means we have no global uniforms to forward to the pipeline
-		NullableHandle<FramebufferHandle> _framebuffer; // empty means we draw to screen
+        UniformBlockHandle passUniforms = UniformBlockHandle::Null; // empty means we have no global uniforms to forward to the pipeline
+        FramebufferHandle _framebuffer = FramebufferHandle::Null; // empty means we draw to screen
 
 	public:
         const DrawQueue& drawQueue() const { return _drawQueue; }
-        const FramebufferHandle* framebuffer() const { return _framebuffer.value(); }
+        const FramebufferHandle* framebuffer() const { return _framebuffer == FramebufferHandle::Null ? nullptr : &_framebuffer; }
 
 		void setPassUniforms(UniformBlockHandle handle);
 		void clearPassUniforms();
@@ -634,6 +540,20 @@ namespace TTRendering {
 		StaticDraw = 0,
 		DynamicDraw = 1,
 	};
+
+    // Meshes from files may be associated with transform hierarchies.
+    struct TransformInfo {
+        TransformInfo* parent = nullptr;
+        std::vector<std::pair<size_t, size_t>> meshIndices;
+        TT::Vec3 translate, radians, scale;
+        TT::ERotateOrder rotateOrder;
+    };
+
+    struct MeshFileInfo {
+        std::vector<std::vector<MeshHandle>> subMeshesByMaterialId;
+        std::vector<TransformInfo> transforms;
+        std::vector<std::string> materialNames;
+    };
 
 	// TODO: There is no way to free VRAM at present
 	// It may be neat to cache all allocated resources in the context for deletion when the context gets destroyed
@@ -670,7 +590,7 @@ namespace TTRendering {
         }
 
 	public:
-		virtual void windowResized(unsigned int width, unsigned int height) { screenWidth = width; screenHeight = height; }
+		void windowResized(unsigned int width, unsigned int height) { screenWidth = width; screenHeight = height; }
         void resolution(unsigned int& width, unsigned int& height) const { width = screenWidth; height = screenHeight; }
 
 		virtual void beginFrame() = 0;
@@ -687,12 +607,13 @@ namespace TTRendering {
             size_t numInstances = 0, // mesh is not instanced if numInstances == 0
             BufferHandle* instanceData = nullptr, // ignored if numInstances == 0
             const std::vector<MeshAttribute>& instanceAttributeLayout = {}) = 0; // ignored if numInstances == 0 or instanceData == nullptr
-		virtual ShaderStageHandle fetchShaderStage(const char* glslFilePath);
-		virtual ShaderHandle fetchShader(const std::vector<ShaderStageHandle>& stages);
-		virtual UniformBlockHandle createUniformBuffer(const ShaderHandle& shader, const UniformBlockSemantics& semantic);
-		virtual MaterialHandle createMaterial(const ShaderHandle& shader, MaterialBlendMode blendMode = MaterialBlendMode::Opaque);
+        MeshFileInfo loadMesh(const char* fbxFilePath);
+		ShaderStageHandle fetchShaderStage(const char* glslFilePath);
+		ShaderHandle fetchShader(const std::vector<ShaderStageHandle>& stages);
+		UniformBlockHandle createUniformBuffer(const ShaderHandle& shader, const UniformBlockSemantics& semantic);
+		MaterialHandle createMaterial(const ShaderHandle& shader, MaterialBlendMode blendMode = MaterialBlendMode::Opaque);
 		virtual ImageHandle createImage(unsigned int width, unsigned int height, ImageFormat format, ImageInterpolation interpolation = ImageInterpolation::Linear, ImageTiling tiling = ImageTiling::Repeat, const unsigned char* data = nullptr) = 0;
-		NullableHandle<ImageHandle> loadImage(const char* filePath, ImageInterpolation interpolation = ImageInterpolation::Linear, ImageTiling tiling = ImageTiling::Repeat);
+		ImageHandle loadImage(const char* filePath, ImageInterpolation interpolation = ImageInterpolation::Linear, ImageTiling tiling = ImageTiling::Repeat);
 		virtual void imageSize(const ImageHandle& image, unsigned int& width, unsigned int& height) const = 0;
 		virtual void framebufferSize(const FramebufferHandle& framebuffer, unsigned int& width, unsigned int& height) const = 0;
 		virtual void resizeImage(const ImageHandle& image, unsigned int width, unsigned int height) = 0;

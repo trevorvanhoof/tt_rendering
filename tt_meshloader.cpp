@@ -1,19 +1,8 @@
 #include "tt_meshloader.h"
+#include "../tt_cpplib/tt_files.h"
 
 namespace {
-    bool FileExists(const std::string_view filePath) {
-        DWORD fileAttrib = GetFileAttributesA(filePath.data());
-        return (fileAttrib != INVALID_FILE_ATTRIBUTES && !(fileAttrib & FILE_ATTRIBUTE_DIRECTORY));
-    }
-
-    uint64_t FileLastWriteTime(const std::string_view filePath) {
-        WIN32_FILE_ATTRIBUTE_DATA info = {};
-        if(!GetFileAttributesExA(filePath.data(), GetFileExInfoStandard, &info))
-            return 0;
-        return static_cast<uint64_t>(info.ftLastWriteTime.dwHighDateTime) << 32 | static_cast<uint64_t>(info.ftLastWriteTime.dwLowDateTime);
-    }
-
-    std::string CachedFilePath(const std::string_view path) {
+    std::string cachedFilePath(const std::string_view path) {
         const size_t pathHash = std::hash<std::string>{}(std::string(path));
         return "cache/" + std::to_string(pathHash) + ".bin";
     }
@@ -26,26 +15,26 @@ namespace {
 }
 
 namespace TT {
-    FbxScene::~FbxScene() {
-        freeMeshes(meshes.data(), (uint32_t)meshes.size());
-        freeNodes(nodes.data(), (uint32_t)nodes.size());
+    FbxExtractor::~FbxExtractor() {
+        freeMeshes(_meshes.data(), (uint32_t)_meshes.size());
+        freeNodes(_nodes.data(), (uint32_t)_nodes.size());
     }
 
-    FbxScene::FbxScene(const std::string_view filePath, FbxAxisSystem::EUpVector up, FbxAxisSystem::EFrontVector front, FbxAxisSystem::ECoordSystem flip, Units unit) {
-        if (LoadFromCache(filePath)) 
+    FbxExtractor::FbxExtractor(const std::string_view filePath, int up, int front, int flip, Units unit) {
+        if (loadFromCache(filePath)) 
             return;
         FbxImportContext* context = importFbx(filePath.data(), up, front, flip, unit);
-        meshes = TT_FBX::extractMeshes(context);
-        nodes = TT_FBX::extractNodes(context);
+        _meshes = TT_FBX::extractMeshes(context);
+        _nodes = TT_FBX::extractNodes(context);
         freeFbx(context);
-        SaveToCache(filePath);
+        saveToCache(filePath);
     }
 
-    void FbxScene::SaveToCache(const std::string_view filePath) const {
-        const std::string cacheFile = CachedFilePath(filePath);
+    void FbxExtractor::saveToCache(const std::string_view filePath) const {
+        const std::string cacheFile = cachedFilePath(filePath);
         TT::BinaryWriter writer(cacheFile);
-        writer.u64(meshes.size());
-        for(const auto& multiMesh : meshes) {
+        writer.u64(_meshes.size());
+        for(const auto& multiMesh : _meshes) {
             writer.u32(multiMesh.name.length);
             writer.write(multiMesh.name.buffer, multiMesh.name.length);
 
@@ -88,8 +77,8 @@ namespace TT {
             }
         }
 
-        writer.u64(nodes.size());
-        for (const auto& node : nodes) {
+        writer.u64(_nodes.size());
+        for (const auto& node : _nodes) {
             writer.u32(node.name.length);
             writer.write(node.name.buffer, node.name.length);
 
@@ -108,17 +97,17 @@ namespace TT {
         }
     }
 
-    bool FbxScene::LoadFromCache(const std::string_view filePath) {
-        const std::string cacheFile = CachedFilePath(filePath);
+    bool FbxExtractor::loadFromCache(const std::string_view filePath) {
+        const std::string cacheFile = cachedFilePath(filePath);
 
         // compare write times
-        if(!FileExists(cacheFile) || FileLastWriteTime(filePath) > FileLastWriteTime(cacheFile))
+        if(!TT::fileExists(cacheFile) || TT::fileLastWriteTime(filePath) > TT::fileLastWriteTime(cacheFile))
             return false;
 
         TT::BinaryReader reader(cacheFile);
-        meshes.resize(reader.u64());
-        for(size_t i = 0; i < meshes.size(); ++i) {
-            auto& mesh = meshes[i];
+        _meshes.resize(reader.u64());
+        for(size_t i = 0; i < _meshes.size(); ++i) {
+            auto& mesh = _meshes[i];
             readCString(reader, mesh.name);
 
             mesh.materialNameCount = reader.u32();

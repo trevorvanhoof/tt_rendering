@@ -382,7 +382,7 @@ namespace TTRendering {
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 
         size_t attributeLayoutHash = TT::hashCombine(hashMeshLayout(attributeLayout), hashMeshLayout(instanceAttributeLayout));
-		return registerMesh(MeshHandle(glHandle, attributeLayoutHash, vertexData, numElements, primitiveType, IndexType::U32, indexData, numInstances, instanceData));
+		return registerMesh(MeshHandle(glHandle, attributeLayoutHash, vertexData, numElements, primitiveType, indexData, numInstances, instanceData));
 	}
 
 	ShaderStageHandle OpenGLContext::createShaderStage(const char* glslFilePath) {
@@ -463,8 +463,8 @@ namespace TTRendering {
     void OpenGLContext::resizeFramebuffer(const FramebufferHandle& framebuffer, unsigned int width, unsigned int height) {
         for(auto& image : framebuffer._colorAttachments)
             resizeImage(image, width, height);
-        if(framebuffer._depthStencilAttachment)
-            resizeImage(*framebuffer._depthStencilAttachment, width, height);
+        if(framebuffer._depthStencilAttachment != ImageHandle::Null)
+            resizeImage(framebuffer._depthStencilAttachment, width, height);
     }
 
 	FramebufferHandle OpenGLContext::createFramebuffer(const std::vector<ImageHandle>& colorAttachments, const ImageHandle* depthStencilAttachment) {
@@ -616,8 +616,8 @@ namespace TTRendering {
     }
 
     void OpenGLContext::framebufferSize(const FramebufferHandle& framebuffer, unsigned int& width, unsigned int& height) const {
-        if(framebuffer._depthStencilAttachment)
-            return imageSize(*framebuffer._depthStencilAttachment, width, height);
+        if(framebuffer._depthStencilAttachment != ImageHandle::Null)
+            return imageSize(framebuffer._depthStencilAttachment, width, height);
         TT::assert(framebuffer._colorAttachments.size() > 0);
         return imageSize(framebuffer._colorAttachments[0], width, height);
     }
@@ -637,14 +637,13 @@ namespace TTRendering {
 #endif
 
 	void OpenGLContext::drawPass(const RenderPass& pass, unsigned int defaultFramebuffer) {
-        // bindFramebuffer((const TTRendering::FramebufferHandle*)pass.framebuffer);
-        if (!pass._framebuffer) {
+        if (pass._framebuffer == FramebufferHandle::Null) {
             glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebuffer);
             glViewport(0, 0, screenWidth, screenHeight); TT_GL_DBG_ERR;
         } else {
-            glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)pass._framebuffer->identifier());
+            glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)pass._framebuffer.identifier());
             unsigned int width, height;
-            framebufferSize(*pass._framebuffer, width, height);
+            framebufferSize(pass._framebuffer, width, height);
             glViewport(0, 0, width, height); TT_GL_DBG_ERR;
         }
 
@@ -658,14 +657,14 @@ namespace TTRendering {
 
 		glClear(clearFlags); TT_GL_DBG_ERR;
 
-		if (!pass.passUniforms.isEmpty()) {
+		if (pass.passUniforms != UniformBlockHandle::Null) {
 			glBindBuffer(GL_UNIFORM_BUFFER, passUbo);
-			size_t requiredBufferSize = pass.passUniforms.value()->size();
+			size_t requiredBufferSize = pass.passUniforms.size();
 			if (passUboSize < requiredBufferSize) {
 				glBufferData(GL_UNIFORM_BUFFER, requiredBufferSize, nullptr, GL_DYNAMIC_DRAW);
 				passUboSize = requiredBufferSize;
 			}
-			glBufferSubData(GL_UNIFORM_BUFFER, 0, requiredBufferSize, pass.passUniforms.value()->cpuBuffer());
+			glBufferSubData(GL_UNIFORM_BUFFER, 0, requiredBufferSize, pass.passUniforms.cpuBuffer());
 			glBindBufferRange(GL_UNIFORM_BUFFER, (GLuint)UniformBlockSemantics::Pass, passUbo, 0, requiredBufferSize);
 		}
 
