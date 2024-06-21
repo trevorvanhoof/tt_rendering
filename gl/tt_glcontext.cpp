@@ -731,7 +731,8 @@ namespace TTRendering {
         glDispatchCompute(x, y, z);
         glMemoryBarrier(GL_ALL_BARRIER_BITS);
         // Remnant to verify written data:
-        // TT::Vec3* points = (TT::Vec3*)glMapBuffer(GL_SHADER_STORAGE_BUFFER, GL_READ_ONLY);
+        // float* points = (float*)glMapBuffer(GL_SHADER_STORAGE_BUFFER, GL_READ_ONLY);
+        // glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
     }
 
 	void OpenGLContext::deleteBuffer(const BufferHandle& buffer) {
