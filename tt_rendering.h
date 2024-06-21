@@ -165,6 +165,7 @@ namespace TTRendering {
 		size_t size() const;
 
         static const BufferHandle Null;
+        operator bool() const { return *this != Null; }
         bool operator==(const BufferHandle& rhs) const { return identifier() == rhs.identifier(); }
         bool operator!=(const BufferHandle& rhs) const { return !operator==(rhs); }
 	};
@@ -209,6 +210,7 @@ namespace TTRendering {
 		IndexType indexType() const;
 
         static const MeshHandle Null;
+        operator bool() const { return *this != Null; }
         bool operator==(const MeshHandle& rhs) const { return identifier() == rhs.identifier(); }
         bool operator!=(const MeshHandle& rhs) const { return !operator==(rhs); }
 	};
@@ -245,6 +247,7 @@ namespace TTRendering {
 		// TODO: generate mip maps?
 
         static const ImageHandle Null;
+        operator bool() const { return *this != Null; }
         bool operator==(const ImageHandle& rhs) const { return identifier() == rhs.identifier(); }
         bool operator!=(const ImageHandle& rhs) const { return !operator==(rhs); }
 	};
@@ -262,6 +265,7 @@ namespace TTRendering {
         const ImageHandle* depthStencilAttachment() const {  return (_depthStencilAttachment == ImageHandle::Null) ? nullptr : &_depthStencilAttachment; }
 
         static const FramebufferHandle Null;
+        operator bool() const { return *this != Null; }
         bool operator==(const FramebufferHandle& rhs) const { return identifier() == rhs.identifier(); }
         bool operator!=(const FramebufferHandle& rhs) const { return !operator==(rhs); }
 	};
@@ -291,6 +295,7 @@ namespace TTRendering {
 
     public: 
         static const ShaderHandle Null;
+        operator bool() const { return *this != Null; }
         bool operator==(const ShaderHandle& rhs) const { return identifier() == rhs.identifier(); }
         bool operator!=(const ShaderHandle& rhs) const { return !operator==(rhs); }
     };
@@ -408,6 +413,7 @@ namespace TTRendering {
 		bool set(size_t binding, const BufferHandle& buffer);
 
         static const UniformBlockHandle Null;
+        operator bool() const { return *this != Null; }
         bool operator==(const UniformBlockHandle& rhs) const { return _resources == rhs._resources && isMaterialBlockHandle() == rhs.isMaterialBlockHandle(); }
         bool operator!=(const UniformBlockHandle& rhs) const { return !operator==(rhs); }
 	};
@@ -439,6 +445,7 @@ namespace TTRendering {
 		MaterialBlendMode blendMode() const;
 
         static const MaterialHandle Null;
+        operator bool() const { return *this != Null; }
         bool operator==(const MaterialHandle& rhs) const { return _shader.identifier() == rhs._shader.identifier() && UniformBlockHandle::operator==(rhs); }
         bool operator!=(const MaterialHandle& rhs) const { return !operator==(rhs); }
 	};
@@ -555,7 +562,7 @@ namespace TTRendering {
         std::vector<std::string> materialNames;
     };
 
-	// TODO: There is no way to free VRAM at present
+	// TODO: deleteShaderStage and resource grouping:
 	// It may be neat to cache all allocated resources in the context for deletion when the context gets destroyed
 	// UNLESS a resource group is provided to push it into instead; then that group can be freed in one go
 	// and we don't have to go remove elements from the context's own delete queue.
