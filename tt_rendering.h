@@ -14,7 +14,6 @@
 #endif
 
 namespace TTRendering {
-	// TODO: Use tt_containers instead of this workaround?
 	// The reason these exist is because internally std::map generates std::pair
 	// which in turn fails to copy or default construct or whatever. std::vector works fine.
 	template<typename T>
@@ -241,10 +240,9 @@ namespace TTRendering {
 		ImageHandle(size_t identifier, ImageFormat format, ImageInterpolation interpolation, ImageTiling tiling);
 
 	public:
-		ImageFormat format() const;
-		ImageInterpolation interpolation() const;
-		ImageTiling tiling() const;
-		// TODO: generate mip maps?
+        ImageFormat format() const { return _format; }
+        ImageInterpolation interpolation() const { return _interpolation; }
+        ImageTiling tiling() const { return _tiling; }
 
         static const ImageHandle Null;
         operator bool() const { return *this != Null; }

@@ -59,8 +59,6 @@ namespace TTRendering {
 	ImageHandle::ImageHandle(size_t identifier, ImageFormat format, ImageInterpolation interpolation, ImageTiling tiling) :
 		HandleBase(identifier), _format(format), _interpolation(interpolation), _tiling(tiling) {}
 
-	ImageFormat ImageHandle::format() const { return _format; }
-	
 	FramebufferHandle::FramebufferHandle(size_t identifier, const std::vector<ImageHandle>& colorAttachments, const ImageHandle* depthStencilAttachment) :
 		HandleBase(identifier), _colorAttachments(colorAttachments) {
 		if (depthStencilAttachment)
