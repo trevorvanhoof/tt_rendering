@@ -1,3 +1,6 @@
+// TODO: ResourcePool / ResourcePoolHandle: createResourcePool method that makes a new collection of handles to clean up, 
+// all create mehods should get resource pool arguments, including resourcepool because why not have hierarchical pools.
+// Then we can deleteResourcePool to free all contained resources at once.
 #pragma once
 
 #include "../tt_cpplib/tt_math.h"
@@ -8,6 +11,7 @@
 #include <map>
 #include <string>
 #include <algorithm>
+#include <variant>
 
 #ifndef BEFRIEND_CONTEXTS
 #define BEFRIEND_CONTEXTS friend class RenderingContext; friend class OpenGLContext; friend class VkContext;
@@ -16,6 +20,7 @@
 namespace TTRendering {
 	// The reason these exist is because internally std::map generates std::pair
 	// which in turn fails to copy or default construct or whatever. std::vector works fine.
+    // TODO: Since handles are now nullable we can make them default construct to null and then it should work (?)
 	template<typename T>
 	class HandlePool {
 		std::unordered_map<size_t, size_t> identifierToIndex;
@@ -69,6 +74,16 @@ namespace TTRendering {
             // Note: we do not remove from handles[] here because
             // that would invalidate all indices in keyToIndex.
             keyToIndex.erase(key);
+        }
+
+        void removeValue(const T& handle) {
+            // TODO: This is slow and bad.
+            const auto& it_ = std::find(handles.begin(), handles.end(), handle);
+            TT::assert(it_ != handles.end());
+            size_t handleIndex = it_ - handles.begin();
+            const auto& it = std::find_if(keyToIndex.begin(), keyToIndex.end(), [&handleIndex](auto&& pair) { return pair.second == handleIndex; });
+            TT::assert(it != keyToIndex.end());
+            remove(it->first);
         }
 
         const T* find(const K& key) const {
@@ -176,8 +191,8 @@ namespace TTRendering {
 	enum class IndexType {
 		None, U8, U16, U32
 	};
-
-	class MeshHandle : public HandleBase {
+    
+	class MeshHandle final : public HandleBase {
 		BEFRIEND_CONTEXTS;
 
 		friend class RenderPass;
@@ -286,6 +301,11 @@ namespace TTRendering {
 
 	public:
 		ShaderStage stage() const;
+
+        static const ShaderStageHandle Null;
+        operator bool() const { return *this != Null; }
+        bool operator==(const ShaderStageHandle& rhs) const { return identifier() == rhs.identifier(); }
+        bool operator!=(const ShaderStageHandle& rhs) const { return !operator==(rhs); }
 	};
 
 	class ShaderHandle final : public HandleBase { 
@@ -447,7 +467,7 @@ namespace TTRendering {
         bool operator==(const MaterialHandle& rhs) const { return _shader.identifier() == rhs._shader.identifier() && UniformBlockHandle::operator==(rhs); }
         bool operator!=(const MaterialHandle& rhs) const { return !operator==(rhs); }
 	};
-
+    
 	struct PushConstants {
 		// In OpenGL this gets uploaded to uModelMatrix and uExtraData by name.
 		TT::Mat44 modelMatrix = TT::MAT44_IDENTITY;
@@ -490,12 +510,11 @@ namespace TTRendering {
         };
 
         struct ShaderQueue {
-
             std::unordered_map<size_t, size_t> shaderIdentifierToQueueIndex;
-            std::vector<size_t> keys;
+            std::vector<ShaderHandle> keys;
             std::vector<MaterialQueue> queues;
 
-            MaterialQueue& fetch(size_t key, size_t& index);
+            MaterialQueue& fetch(const ShaderHandle& key, size_t& index);
         };
 
         struct DrawQueue {
@@ -560,30 +579,32 @@ namespace TTRendering {
         std::vector<std::string> materialNames;
     };
 
-	// TODO: deleteShaderStage and resource grouping:
-	// It may be neat to cache all allocated resources in the context for deletion when the context gets destroyed
-	// UNLESS a resource group is provided to push it into instead; then that group can be freed in one go
-	// and we don't have to go remove elements from the context's own delete queue.
 	class RenderingContext {
-	protected:
         unsigned int screenWidth = 32;
         unsigned int screenHeight = 32;
 
-		HandlePool<MeshHandle> meshes; // allocated meshes, used during drawPass but may be redundant
 		HandleDict<std::string, ShaderStageHandle> shaderStagePool; // file path or source code to shader stage map
 		HandleDict<size_t, ShaderHandle> shaderPool; // hash of the shader stages used by the shader to shader map
 		std::unordered_map<size_t, std::unordered_map<int, UniformInfo>> shaderUniformInfo; // shader identifier to uniform info map
 
-		const MeshHandle& registerMesh(const MeshHandle& handle);
-		const ShaderStageHandle& registerShaderStage(const char* glslFilePath, const ShaderStageHandle& handle);
-		const ShaderHandle& registerShader(size_t hash, const ShaderHandle& handle, const std::unordered_map<int, UniformInfo>& uniformBlocks);
+        // CPU, 1 created per requested uniform block / material
+        std::vector<UniformResources*> materialResources;
+
+    protected:
+        HandlePool<MeshHandle> meshes; // allocated meshes, used during drawPass
+
+        const MeshHandle& registerMesh(const MeshHandle& handle);
+        const ShaderStageHandle& registerShaderStage(const char* glslFilePath, const ShaderStageHandle& handle);
+        const ShaderHandle& registerShader(size_t hash, const ShaderHandle& handle, const std::unordered_map<int, UniformInfo>& uniformBlocks);
+
+        void deregisterMesh(const MeshHandle& handle);
+        void deregisterShaderStage(const ShaderStageHandle& handle);
+        void deregisterShader(const ShaderHandle& handle);
 
 		virtual std::unordered_map<int, UniformInfo> getUniformBlocks(const ShaderHandle& shader, const std::vector<ShaderStageHandle>& stages) const = 0;
+
 		virtual ShaderStageHandle createShaderStage(const char* glslFilePath) = 0;
 		virtual ShaderHandle createShader(const std::vector<ShaderStageHandle>& stages) = 0;
-
-		// CPU, 1 created per requested uniform block / material
-		std::vector<UniformResources*> materialResources;
 
 		static size_t hashMeshLayout(const std::vector<MeshAttribute>& attributes);
 
@@ -593,6 +614,8 @@ namespace TTRendering {
                 seed = TT::hashCombine(seed, handles[i].identifier());
             return seed;
         }
+
+        const UniformInfo* materialUniformInfo(const ShaderHandle& handle) const;
 
 	public:
 		void windowResized(unsigned int width, unsigned int height) { screenWidth = width; screenHeight = height; }
@@ -619,20 +642,21 @@ namespace TTRendering {
 		MaterialHandle createMaterial(const ShaderHandle& shader, MaterialBlendMode blendMode = MaterialBlendMode::Opaque);
 		virtual ImageHandle createImage(unsigned int width, unsigned int height, ImageFormat format, ImageInterpolation interpolation = ImageInterpolation::Linear, ImageTiling tiling = ImageTiling::Repeat, const unsigned char* data = nullptr) = 0;
 		ImageHandle loadImage(const char* filePath, ImageInterpolation interpolation = ImageInterpolation::Linear, ImageTiling tiling = ImageTiling::Repeat);
-		virtual void imageSize(const ImageHandle& image, unsigned int& width, unsigned int& height) const = 0;
+        virtual FramebufferHandle createFramebuffer(const std::vector<ImageHandle>& colorAttachments, const ImageHandle* depthStencilAttachment = nullptr) = 0;
+
+        virtual void imageSize(const ImageHandle& image, unsigned int& width, unsigned int& height) const = 0;
 		virtual void framebufferSize(const FramebufferHandle& framebuffer, unsigned int& width, unsigned int& height) const = 0;
 		virtual void resizeImage(const ImageHandle& image, unsigned int width, unsigned int height) = 0;
         virtual void resizeFramebuffer(const FramebufferHandle& framebuffer, unsigned int width, unsigned int height) = 0;
-		virtual FramebufferHandle createFramebuffer(const std::vector<ImageHandle>& colorAttachments, const ImageHandle* depthStencilAttachment = nullptr) = 0;
         virtual void dispatchCompute(const MaterialHandle& material, unsigned int x, unsigned int y, unsigned int z) = 0;
 
 		virtual void deleteBuffer(const BufferHandle& buffer) = 0;
 		virtual void deleteMesh(const MeshHandle& mesh) = 0;
-		// virtual void deleteShaderStage(const ShaderStageHandle& mesh) = 0;
+		virtual void deleteShaderStage(const ShaderStageHandle& mesh) = 0;
 		virtual void deleteShader(const ShaderHandle& mesh) = 0;
 		virtual void deleteImage(const ImageHandle& mesh) = 0;
-		virtual void deleteMaterial(const MaterialHandle& material) = 0;
-		virtual void deleteUniformBuffer(const UniformBlockHandle& material) = 0;
+		void deleteMaterial(const MaterialHandle& material);
+		void deleteUniformBuffer(const UniformBlockHandle& material);
 		virtual void deleteFramebuffer(const FramebufferHandle& material) = 0;
 	};
 }

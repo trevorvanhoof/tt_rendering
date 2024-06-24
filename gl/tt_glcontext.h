@@ -8,14 +8,13 @@ namespace TTRendering {
 		HDC__* _windowsGLContext = nullptr;
 		std::unordered_map<int, UniformInfo> getUniformBlocks(const ShaderHandle& shader, const std::vector<ShaderStageHandle>& stages) const override;
 
-        const UniformInfo* materialUniformInfo(size_t shaderIdentifier) const;
         void bindAndAllocateMaterialUBO(const UniformInfo* uniformInfo) const;
         void applyMaterialBlendMode(const MaterialHandle& material) const;
         void uploadMaterial(const UniformInfo* uniformInfo, const MaterialHandle& material) const;
         void bindMaterialImages(const MaterialHandle& material, size_t shaderIdentifier) const;
         void bindMaterialSSBOs(const MaterialHandle& material) const;
 
-        const UniformInfo* useAndPrepareShader(size_t shaderIdentifier) const;
+        const UniformInfo* useAndPrepareShader(const ShaderHandle& handle) const;
         void bindMaterialResources(const UniformInfo* uniformInfo, const MaterialHandle& material, size_t shaderIdentifier) const;
 
 		ShaderStageHandle createShaderStage(const char* glslFilePath) override;
@@ -50,11 +49,9 @@ namespace TTRendering {
         void dispatchCompute(const MaterialHandle& material, unsigned int x = 1, unsigned int y = 1, unsigned int z = 1) override;
         void deleteBuffer(const BufferHandle& buffer) override;
         void deleteMesh(const MeshHandle& mesh) override;
-        // void deleteShaderStage(const ShaderStageHandle& mesh) override;
+        void deleteShaderStage(const ShaderStageHandle& mesh) override;
         void deleteShader(const ShaderHandle& mesh) override;
         void deleteImage(const ImageHandle& mesh) override;
-        void deleteMaterial(const MaterialHandle& material) override;
-        void deleteUniformBuffer(const UniformBlockHandle& material) override;
         void deleteFramebuffer(const FramebufferHandle& material) override;
 	};
 }

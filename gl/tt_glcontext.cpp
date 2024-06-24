@@ -516,17 +516,6 @@ namespace TTRendering {
 		return FramebufferHandle(glHandle, colorAttachments, depthStencilAttachment);
 	}
 
-    const UniformInfo* OpenGLContext::materialUniformInfo(size_t shaderIdentifier) const {
-        // Get material uniform block info for this shader
-        TT::assert(shaderUniformInfo.find(shaderIdentifier) != shaderUniformInfo.end());
-        const auto& uniformBlocks = shaderUniformInfo.find(shaderIdentifier)->second;
-        auto it = uniformBlocks.find((int)UniformBlockSemantics::Material);
-        const UniformInfo* uniformInfo = nullptr;
-        if (it != uniformBlocks.end())
-            uniformInfo = &it->second;
-        return uniformInfo;
-    }
-
     void OpenGLContext::bindAndAllocateMaterialUBO(const UniformInfo* uniformInfo) const {
         if (uniformInfo) {
             glBindBuffer(GL_UNIFORM_BUFFER, materialUbo);
@@ -538,11 +527,11 @@ namespace TTRendering {
         }
     }
 
-    const UniformInfo* OpenGLContext::useAndPrepareShader(size_t shaderIdentifier) const {
+    const UniformInfo* OpenGLContext::useAndPrepareShader(const ShaderHandle& handle) const {
         // Enable shader
-        glUseProgram((GLuint)shaderIdentifier);
+        glUseProgram((GLuint)handle.identifier());
         // Get material uniform block info for this shader
-        const UniformInfo* uniformInfo = materialUniformInfo(shaderIdentifier);
+        const UniformInfo* uniformInfo = materialUniformInfo(handle);
         // Allocate enough space
         bindAndAllocateMaterialUBO(uniformInfo);
         return uniformInfo;
@@ -639,7 +628,9 @@ namespace TTRendering {
 	void OpenGLContext::drawPass(const RenderPass& pass, unsigned int defaultFramebuffer) {
         if (pass._framebuffer == FramebufferHandle::Null) {
             glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebuffer);
-            glViewport(0, 0, screenWidth, screenHeight); TT_GL_DBG_ERR;
+            unsigned int w, h; 
+            resolution(w, h);
+            glViewport(0, 0, w, h); TT_GL_DBG_ERR;
         } else {
             glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)pass._framebuffer.identifier());
             unsigned int width, height;
@@ -672,7 +663,7 @@ namespace TTRendering {
 			size_t meshLayoutHash = pass._drawQueue.keys[meshLayoutIndex];
 			const auto& shaderQueue = pass._drawQueue.queues[meshLayoutIndex];
 			for (size_t shaderIndex = 0; shaderIndex < shaderQueue.keys.size(); ++shaderIndex) {
-				size_t shaderIdentifier = shaderQueue.keys[shaderIndex];
+				size_t shaderIdentifier = shaderQueue.keys[shaderIndex].identifier();
 
                 const UniformInfo* uniformInfo = useAndPrepareShader((GLuint)shaderIdentifier);
 
@@ -743,18 +734,17 @@ namespace TTRendering {
 	void OpenGLContext::deleteMesh(const MeshHandle& mesh) {
 		GLuint handle = (GLuint)mesh.identifier();
 		glDeleteVertexArrays(1, &handle);
-        meshes.remove(mesh);
+        deregisterMesh(mesh);
 	}
 
-    /*void OpenGLContext::deleteShaderStage(const ShaderStageHandle& stage) {
-        shaderStagePool.remove(stage);
+    void OpenGLContext::deleteShaderStage(const ShaderStageHandle& stage) {
         glDeleteShader((GLuint)stage.identifier());
-    }*/
+        deregisterShaderStage(stage);
+    }
 
     void OpenGLContext::deleteShader(const ShaderHandle& shader) {
-        shaderPool.remove(shader.identifier());
-        shaderUniformInfo.erase(shader.identifier());
         glDeleteProgram((GLuint)shader.identifier());
+        deregisterShader(shader);
     }
 
     void OpenGLContext::deleteImage(const ImageHandle& image) {
@@ -762,23 +752,8 @@ namespace TTRendering {
         glDeleteTextures(1, &handle);
     }
 
-    void OpenGLContext::deleteMaterial(const MaterialHandle& material) {
-        auto it = std::find(materialResources.begin(), materialResources.end(), material._resources);
-        TT::assert(it != materialResources.end());
-        if(it != materialResources.end())
-            materialResources.erase(it);
-    }
-
-    void OpenGLContext::deleteUniformBuffer(const UniformBlockHandle& uniformBuffer) {
-        auto it = std::find(materialResources.begin(), materialResources.end(), uniformBuffer._resources);
-        TT::assert(it != materialResources.end());
-        if(it != materialResources.end())
-            materialResources.erase(it);
-    }
-
     void OpenGLContext::deleteFramebuffer(const FramebufferHandle& frameBuffer) {
         GLuint handle = (GLuint)frameBuffer.identifier();
         glDeleteFramebuffers(1, &handle);
     }
-
 }

@@ -251,11 +251,11 @@ namespace TTRendering {
         }
 	}
 
-	MaterialQueue& ShaderQueue::fetch(size_t key, size_t& index) {
+	MaterialQueue& ShaderQueue::fetch(const ShaderHandle& key, size_t& index) {
 		// Ensure we have a queue with this shader
-		auto it = shaderIdentifierToQueueIndex.find(key);
+		auto it = shaderIdentifierToQueueIndex.find(key.identifier());
 		if (it == shaderIdentifierToQueueIndex.end()) {
-			shaderIdentifierToQueueIndex[key] = queues.size();
+			shaderIdentifierToQueueIndex[key.identifier()] = queues.size();
 			keys.push_back(key);
             index = queues.size();
 			return queues.emplace_back();
@@ -303,7 +303,7 @@ namespace TTRendering {
         RenderEntry result;
         auto& queue = _drawQueue
             .fetch(mesh._meshLayoutHash, result.meshLayoutQueueIndex)
-            .fetch(material._shader.identifier(), result.shaderQueueIndex)
+            .fetch(material._shader, result.shaderQueueIndex)
             .fetch(material, result.materialQueueIndex);
         result.meshIndex = queue.next++;
         DrawInfo& e = queue.orderedQueue[result.meshIndex];
@@ -369,16 +369,42 @@ namespace TTRendering {
 		return handle;
 	}
 
+    void RenderingContext::deregisterMesh(const MeshHandle& handle) {
+        meshes.remove(handle);
+    }
+    
+    void RenderingContext::deregisterShaderStage(const ShaderStageHandle& handle) {
+        shaderStagePool.removeValue(handle);
+    }
+    
+    void RenderingContext::deregisterShader(const ShaderHandle& handle) {
+        shaderPool.removeValue(handle);
+        shaderUniformInfo.erase(handle.identifier());
+    }
+
+    const UniformInfo* RenderingContext::materialUniformInfo(const ShaderHandle& handle) const {
+        // Get material uniform block info for the given shader
+        TT::assert(shaderUniformInfo.find(handle.identifier()) != shaderUniformInfo.end());
+        const auto& uniformBlocks = shaderUniformInfo.find(handle.identifier())->second;
+        auto it = uniformBlocks.find((int)UniformBlockSemantics::Material);
+        const UniformInfo* uniformInfo = nullptr;
+        if (it != uniformBlocks.end())
+            uniformInfo = &it->second;
+        return uniformInfo;
+    }
+
 	MaterialHandle RenderingContext::createMaterial(const ShaderHandle& shader, MaterialBlendMode blendMode) {
 		TT::assert(shaderUniformInfo.contains(shader.identifier()));
 		const std::unordered_map<int, UniformInfo>& info = shaderUniformInfo.find(shader.identifier())->second;
 		auto it = info.find((int)UniformBlockSemantics::Material);
 		if (it != info.end()) {
             materialResources.push_back(new UniformResources {new unsigned char[it->second.bufferSize], {}, {} });
-			return MaterialHandle(shader, it->second, materialResources.back(), blendMode);
+			MaterialHandle handle(shader, it->second, materialResources.back(), blendMode);
+            return handle;
 		}
         materialResources.push_back(new UniformResources {nullptr, {}, {} });
-		return MaterialHandle(shader, materialResources.back(), blendMode);
+		MaterialHandle handle(shader, materialResources.back(), blendMode);
+        return handle;
 	}
 
 	UniformBlockHandle RenderingContext::createUniformBuffer(const ShaderHandle& shader, const UniformBlockSemantics& semantic) {
@@ -394,6 +420,20 @@ namespace TTRendering {
         materialResources.push_back(new UniformResources {nullptr, {}, {} });
 		return UniformBlockHandle(materialResources.back());
 	}
+
+    void RenderingContext::deleteMaterial(const MaterialHandle& material) {
+        auto it = std::find(materialResources.begin(), materialResources.end(), material._resources);
+        TT::assert(it != materialResources.end());
+        if(it != materialResources.end())
+            materialResources.erase(it);
+    }
+
+    void RenderingContext::deleteUniformBuffer(const UniformBlockHandle& uniformBuffer) {
+        auto it = std::find(materialResources.begin(), materialResources.end(), uniformBuffer._resources);
+        TT::assert(it != materialResources.end());
+        if(it != materialResources.end())
+            materialResources.erase(it);
+    }
 
 	ShaderStageHandle RenderingContext::fetchShaderStage(const char* glslFilePath) {
 		if (const ShaderStageHandle* existing = shaderStagePool.find(glslFilePath))
@@ -545,6 +585,7 @@ namespace TTRendering {
     const MeshHandle MeshHandle::Null(0, 0, BufferHandle::Null, 0, PrimitiveType::Line);
     const ImageHandle ImageHandle::Null(0, TTRendering::ImageFormat::RGBA32F, TTRendering::ImageInterpolation::Linear, TTRendering::ImageTiling::Clamp);
     const FramebufferHandle FramebufferHandle::Null(0, {}, nullptr);
+    const ShaderStageHandle ShaderStageHandle::Null(0, ShaderStageHandle::ShaderStage::Compute);
     const ShaderHandle ShaderHandle::Null(0);
     const MaterialHandle MaterialHandle::Null(ShaderHandle::Null, nullptr);
     const UniformBlockHandle UniformBlockHandle::Null(nullptr);
