@@ -314,7 +314,7 @@ namespace TTRendering {
 		    SwapBuffers(_windowsGLContext);
 	}
     
-    BufferHandle OpenGLContext::createBuffer(size_t size, unsigned char* data, BufferMode mode) {
+    BufferHandle OpenGLContext::createBuffer(size_t size, unsigned char* data, BufferMode mode, const ResourcePoolHandle* pool) {
         if (size == 0)
             return BufferHandle(0, size);
         GLuint glHandle;
@@ -322,7 +322,7 @@ namespace TTRendering {
         glBindBuffer(GL_ARRAY_BUFFER, glHandle);
         glBufferData(GL_ARRAY_BUFFER, size, data, mode == BufferMode::StaticDraw ? GL_STATIC_DRAW : GL_DYNAMIC_DRAW);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
-        return BufferHandle(glHandle, size);
+        return registerHandleToPool(BufferHandle(glHandle, size), pool);
     }
 
 
@@ -334,7 +334,8 @@ namespace TTRendering {
         PrimitiveType primitiveType,
         size_t numInstances, // mesh is not instanced if numInstances == 0
         BufferHandle* instanceData, // ignored if numInstances == 0
-        const std::vector<MeshAttribute>& instanceAttributeLayout) { // ignored if numInstances == 0 or instanceData == nullptr
+        const std::vector<MeshAttribute>& instanceAttributeLayout, 
+        const ResourcePoolHandle* pool) { // ignored if numInstances == 0 or instanceData == nullptr
 		GLuint glHandle;
 		glGenVertexArrays(1, &glHandle);
 
@@ -382,7 +383,7 @@ namespace TTRendering {
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 
         size_t attributeLayoutHash = TT::hashCombine(hashMeshLayout(attributeLayout), hashMeshLayout(instanceAttributeLayout));
-		return registerMesh(MeshHandle(glHandle, attributeLayoutHash, vertexData, numElements, primitiveType, indexData, numInstances, instanceData));
+		return registerMesh(MeshHandle(glHandle, attributeLayoutHash, vertexData, numElements, primitiveType, indexData, numInstances, instanceData), pool);
 	}
 
 	ShaderStageHandle OpenGLContext::createShaderStage(const char* glslFilePath) {
@@ -406,6 +407,7 @@ namespace TTRendering {
 			stage = ShaderStageHandle::Compute;
 		}
 
+        // The parent function has fetch(), which also handles registering it, create is protected and only called when necessary.
 		return ShaderStageHandle(compileShader(shaderCode, mode), stage);
 	}
 
@@ -424,10 +426,12 @@ namespace TTRendering {
 			auto b = _getProgramInfoLog(glHandle);
 			TT::error("%s\n", b.data());
 		}
+
+        // The parent function has fetch(), which also handles registering it, create is protected and only called when necessary.
 		return ShaderHandle(glHandle);
 	}
 
-	ImageHandle OpenGLContext::createImage(unsigned int width, unsigned int height, ImageFormat format, ImageInterpolation interpolation, ImageTiling tiling, const unsigned char* data) {
+	ImageHandle OpenGLContext::createImage(unsigned int width, unsigned int height, ImageFormat format, ImageInterpolation interpolation, ImageTiling tiling, const unsigned char* data, const ResourcePoolHandle* pool) {
 		GLuint glHandle;
 		glGenTextures(1, &glHandle); TT_GL_DBG_ERR;
 		glBindTexture(GL_TEXTURE_2D, glHandle); TT_GL_DBG_ERR;
@@ -441,7 +445,7 @@ namespace TTRendering {
 		glFormatInfo(format, internalFormat, channels, elementType); TT_GL_DBG_ERR;
 		glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, width, height, 0, channels, elementType, data); TT_GL_DBG_ERR;
 		glBindTexture(GL_TEXTURE_2D, 0); TT_GL_DBG_ERR;
-		return ImageHandle(glHandle, format, interpolation, tiling);
+		return registerHandleToPool(ImageHandle(glHandle, format, interpolation, tiling), pool);
 	}
 
     void OpenGLContext::imageSize(const ImageHandle& image, unsigned int& width, unsigned int& height) const {
@@ -467,7 +471,7 @@ namespace TTRendering {
             resizeImage(framebuffer._depthStencilAttachment, width, height);
     }
 
-	FramebufferHandle OpenGLContext::createFramebuffer(const std::vector<ImageHandle>& colorAttachments, const ImageHandle* depthStencilAttachment) {
+	FramebufferHandle OpenGLContext::createFramebuffer(const std::vector<ImageHandle>& colorAttachments, const ImageHandle* depthStencilAttachment, const ResourcePoolHandle* pool) {
 		// Verify we have more than 0 attachments
 		TT::assert(colorAttachments.size() > 0 || depthStencilAttachment != nullptr);
 
@@ -513,7 +517,7 @@ namespace TTRendering {
 		}
 
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
-		return FramebufferHandle(glHandle, colorAttachments, depthStencilAttachment);
+        return registerHandleToPool(FramebufferHandle(glHandle, colorAttachments, depthStencilAttachment));
 	}
 
     void OpenGLContext::bindAndAllocateMaterialUBO(const UniformInfo* uniformInfo) const {

@@ -468,6 +468,12 @@ namespace TTRendering {
         bool operator!=(const MaterialHandle& rhs) const { return !operator==(rhs); }
 	};
     
+    // Group allocations for easy releasing
+    struct ResourcePoolHandle : public HandleBase {
+    protected:
+        using HandleBase::HandleBase;
+    };
+
 	struct PushConstants {
 		// In OpenGL this gets uploaded to uModelMatrix and uExtraData by name.
 		TT::Mat44 modelMatrix = TT::MAT44_IDENTITY;
@@ -590,12 +596,24 @@ namespace TTRendering {
         // CPU, 1 created per requested uniform block / material
         std::vector<UniformResources*> materialResources;
 
+        typedef std::variant<BufferHandle, MeshHandle, ImageHandle, FramebufferHandle, ShaderStageHandle, ShaderHandle, UniformBlockHandle, MaterialHandle, ResourcePoolHandle> ResourceHandle;
+        static const size_t defaultResourcePool = 1;
+        std::unordered_map<size_t, std::vector<ResourceHandle>> resourcePools; // = { defaultResourcePool, {} };
+        size_t nextResourcePoolId = defaultResourcePool + 1;
+
+        RenderingContext(const RenderingContext&) = delete;
+        RenderingContext(RenderingContext&&) = delete;
+        RenderingContext& operator=(const RenderingContext&) = delete;
+        RenderingContext& operator=(RenderingContext&&) = delete;
+
     protected:
         HandlePool<MeshHandle> meshes; // allocated meshes, used during drawPass
 
-        const MeshHandle& registerMesh(const MeshHandle& handle);
-        const ShaderStageHandle& registerShaderStage(const char* glslFilePath, const ShaderStageHandle& handle);
-        const ShaderHandle& registerShader(size_t hash, const ShaderHandle& handle, const std::unordered_map<int, UniformInfo>& uniformBlocks);
+        template<typename T> const T& registerHandleToPool(const T& handle, const ResourcePoolHandle* pool = nullptr) { resourcePools[pool ? pool->identifier() : defaultResourcePool].push_back(handle); return handle; }
+
+        const MeshHandle& registerMesh(const MeshHandle& handle, const ResourcePoolHandle* pool = nullptr);
+        const ShaderStageHandle& registerShaderStage(const char* glslFilePath, const ShaderStageHandle& handle, const ResourcePoolHandle* pool = nullptr);
+        const ShaderHandle& registerShader(size_t hash, const ShaderHandle& handle, const std::unordered_map<int, UniformInfo>& uniformBlocks, const ResourcePoolHandle* pool = nullptr);
 
         void deregisterMesh(const MeshHandle& handle);
         void deregisterShaderStage(const ShaderStageHandle& handle);
@@ -618,6 +636,11 @@ namespace TTRendering {
         const UniformInfo* materialUniformInfo(const ShaderHandle& handle) const;
 
 	public:
+        RenderingContext() = default;
+
+        // Clean up all resource pools
+        ~RenderingContext() { for(const auto& pair : resourcePools) deleteResourcePool(ResourcePoolHandle(pair.first)); }
+
 		void windowResized(unsigned int width, unsigned int height) { screenWidth = width; screenHeight = height; }
         void resolution(unsigned int& width, unsigned int& height) const { width = screenWidth; height = screenHeight; }
 
@@ -625,7 +648,7 @@ namespace TTRendering {
 		virtual void endFrame() = 0;
 		virtual void drawPass(const RenderPass& pass, unsigned int defaultFramebuffer = 0) = 0;
 
-		virtual BufferHandle createBuffer(size_t size, unsigned char* data = nullptr, BufferMode mode = BufferMode::StaticDraw) = 0;
+		virtual BufferHandle createBuffer(size_t size, unsigned char* data = nullptr, BufferMode mode = BufferMode::StaticDraw, const ResourcePoolHandle* pool = nullptr) = 0;
 		virtual MeshHandle createMesh(
             size_t numElements, // num vertices if indexData == nullptr, else num indices
             BufferHandle vertexData, 
@@ -634,15 +657,16 @@ namespace TTRendering {
             PrimitiveType primitiveType = PrimitiveType::Triangle,
             size_t numInstances = 0, // mesh is not instanced if numInstances == 0
             BufferHandle* instanceData = nullptr, // ignored if numInstances == 0
-            const std::vector<MeshAttribute>& instanceAttributeLayout = {}) = 0; // ignored if numInstances == 0 or instanceData == nullptr
-        MeshFileInfo loadMesh(const char* fbxFilePath);
-		ShaderStageHandle fetchShaderStage(const char* glslFilePath);
-		ShaderHandle fetchShader(const std::vector<ShaderStageHandle>& stages);
-		UniformBlockHandle createUniformBuffer(const ShaderHandle& shader, const UniformBlockSemantics& semantic);
-		MaterialHandle createMaterial(const ShaderHandle& shader, MaterialBlendMode blendMode = MaterialBlendMode::Opaque);
-		virtual ImageHandle createImage(unsigned int width, unsigned int height, ImageFormat format, ImageInterpolation interpolation = ImageInterpolation::Linear, ImageTiling tiling = ImageTiling::Repeat, const unsigned char* data = nullptr) = 0;
-		ImageHandle loadImage(const char* filePath, ImageInterpolation interpolation = ImageInterpolation::Linear, ImageTiling tiling = ImageTiling::Repeat);
-        virtual FramebufferHandle createFramebuffer(const std::vector<ImageHandle>& colorAttachments, const ImageHandle* depthStencilAttachment = nullptr) = 0;
+            const std::vector<MeshAttribute>& instanceAttributeLayout = {},
+            const ResourcePoolHandle* pool = nullptr) = 0; // ignored if numInstances == 0 or instanceData == nullptr
+        MeshFileInfo loadMesh(const char* fbxFilePath, const ResourcePoolHandle* pool = nullptr);
+		ShaderStageHandle fetchShaderStage(const char* glslFilePath, const ResourcePoolHandle* pool = nullptr);
+		ShaderHandle fetchShader(const std::vector<ShaderStageHandle>& stages, const ResourcePoolHandle* pool = nullptr);
+		UniformBlockHandle createUniformBuffer(const ShaderHandle& shader, const UniformBlockSemantics& semantic, const ResourcePoolHandle* pool = nullptr);
+		MaterialHandle createMaterial(const ShaderHandle& shader, MaterialBlendMode blendMode = MaterialBlendMode::Opaque, const ResourcePoolHandle* pool = nullptr);
+		virtual ImageHandle createImage(unsigned int width, unsigned int height, ImageFormat format, ImageInterpolation interpolation = ImageInterpolation::Linear, ImageTiling tiling = ImageTiling::Repeat, const unsigned char* data = nullptr, const ResourcePoolHandle* pool = nullptr) = 0;
+		ImageHandle loadImage(const char* filePath, ImageInterpolation interpolation = ImageInterpolation::Linear, ImageTiling tiling = ImageTiling::Repeat, const ResourcePoolHandle* pool = nullptr);
+        virtual FramebufferHandle createFramebuffer(const std::vector<ImageHandle>& colorAttachments, const ImageHandle* depthStencilAttachment = nullptr, const ResourcePoolHandle* pool = nullptr) = 0;
 
         virtual void imageSize(const ImageHandle& image, unsigned int& width, unsigned int& height) const = 0;
 		virtual void framebufferSize(const FramebufferHandle& framebuffer, unsigned int& width, unsigned int& height) const = 0;
@@ -650,6 +674,7 @@ namespace TTRendering {
         virtual void resizeFramebuffer(const FramebufferHandle& framebuffer, unsigned int width, unsigned int height) = 0;
         virtual void dispatchCompute(const MaterialHandle& material, unsigned int x, unsigned int y, unsigned int z) = 0;
 
+        // TODO: Should we make these all protected so deletion HAS to happen through resource pools?
 		virtual void deleteBuffer(const BufferHandle& buffer) = 0;
 		virtual void deleteMesh(const MeshHandle& mesh) = 0;
 		virtual void deleteShaderStage(const ShaderStageHandle& mesh) = 0;
@@ -658,6 +683,9 @@ namespace TTRendering {
 		void deleteMaterial(const MaterialHandle& material);
 		void deleteUniformBuffer(const UniformBlockHandle& material);
 		virtual void deleteFramebuffer(const FramebufferHandle& material) = 0;
+
+        ResourcePoolHandle createResourcePool(const ResourcePoolHandle* pool = nullptr);
+        void deleteResourcePool(const ResourcePoolHandle& handle);
 	};
 }
 

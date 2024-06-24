@@ -353,20 +353,20 @@ namespace TTRendering {
         return finalHash;
     }
     
-	const ShaderStageHandle& RenderingContext::registerShaderStage(const char* glslFilePath, const ShaderStageHandle& handle) {
+	const ShaderStageHandle& RenderingContext::registerShaderStage(const char* glslFilePath, const ShaderStageHandle& handle, const ResourcePoolHandle* pool) {
 		shaderStagePool.insert(glslFilePath, handle);
-		return handle;
+		return registerHandleToPool(handle, pool);
 	}
 
-	const ShaderHandle& RenderingContext::registerShader(size_t hash, const ShaderHandle& handle, const std::unordered_map<int, UniformInfo>& uniformBlocks) {
+	const ShaderHandle& RenderingContext::registerShader(size_t hash, const ShaderHandle& handle, const std::unordered_map<int, UniformInfo>& uniformBlocks, const ResourcePoolHandle* pool) {
 		shaderPool.insert(hash, handle);
 		shaderUniformInfo[handle.identifier()] = uniformBlocks;
-		return handle;
+		return registerHandleToPool(handle, pool);
 	}
 
-	const MeshHandle& RenderingContext::registerMesh(const MeshHandle& handle) {
+	const MeshHandle& RenderingContext::registerMesh(const MeshHandle& handle, const ResourcePoolHandle* pool) {
 		meshes.insert(handle);
-		return handle;
+        return registerHandleToPool(handle, pool);
 	}
 
     void RenderingContext::deregisterMesh(const MeshHandle& handle) {
@@ -393,21 +393,19 @@ namespace TTRendering {
         return uniformInfo;
     }
 
-	MaterialHandle RenderingContext::createMaterial(const ShaderHandle& shader, MaterialBlendMode blendMode) {
+	MaterialHandle RenderingContext::createMaterial(const ShaderHandle& shader, MaterialBlendMode blendMode, const ResourcePoolHandle* pool) {
 		TT::assert(shaderUniformInfo.contains(shader.identifier()));
 		const std::unordered_map<int, UniformInfo>& info = shaderUniformInfo.find(shader.identifier())->second;
 		auto it = info.find((int)UniformBlockSemantics::Material);
 		if (it != info.end()) {
             materialResources.push_back(new UniformResources {new unsigned char[it->second.bufferSize], {}, {} });
-			MaterialHandle handle(shader, it->second, materialResources.back(), blendMode);
-            return handle;
+            return registerHandleToPool(MaterialHandle(shader, it->second, materialResources.back(), blendMode), pool);
 		}
         materialResources.push_back(new UniformResources {nullptr, {}, {} });
-		MaterialHandle handle(shader, materialResources.back(), blendMode);
-        return handle;
+        return registerHandleToPool(MaterialHandle(shader, materialResources.back(), blendMode), pool);
 	}
 
-	UniformBlockHandle RenderingContext::createUniformBuffer(const ShaderHandle& shader, const UniformBlockSemantics& semantic) {
+	UniformBlockHandle RenderingContext::createUniformBuffer(const ShaderHandle& shader, const UniformBlockSemantics& semantic, const ResourcePoolHandle* pool) {
 		// Will find info for the given block type in the shader and allocate a buffer that is large enough to hold the uniforms for that block.
 		// May return an invalid block if the shader has no such block type.
 		TT::assert(shaderUniformInfo.contains(shader.identifier()));
@@ -415,10 +413,10 @@ namespace TTRendering {
 		auto it = info.find((int)semantic);
 		if (it != info.end()) {
             materialResources.push_back(new UniformResources { new unsigned char[it->second.bufferSize], {}, {} });
-			return UniformBlockHandle(it->second, materialResources.back());
+			return registerHandleToPool(UniformBlockHandle (it->second, materialResources.back()));
 		}
         materialResources.push_back(new UniformResources {nullptr, {}, {} });
-		return UniformBlockHandle(materialResources.back());
+		return registerHandleToPool(UniformBlockHandle(materialResources.back()));
 	}
 
     void RenderingContext::deleteMaterial(const MaterialHandle& material) {
@@ -435,21 +433,65 @@ namespace TTRendering {
             materialResources.erase(it);
     }
 
-	ShaderStageHandle RenderingContext::fetchShaderStage(const char* glslFilePath) {
+	ShaderStageHandle RenderingContext::fetchShaderStage(const char* glslFilePath, const ResourcePoolHandle* pool) {
 		if (const ShaderStageHandle* existing = shaderStagePool.find(glslFilePath))
 			return *existing;
-		return registerShaderStage(glslFilePath, createShaderStage(glslFilePath));
+		return registerShaderStage(glslFilePath, createShaderStage(glslFilePath), pool);
 	}
 
-	ShaderHandle RenderingContext::fetchShader(const std::vector<ShaderStageHandle>& stages) {
+	ShaderHandle RenderingContext::fetchShader(const std::vector<ShaderStageHandle>& stages, const ResourcePoolHandle* pool) {
 		size_t hash = hashHandles(stages.data(), stages.size());
 		if (const ShaderHandle* existing = shaderPool.find(hash))
 			return *existing;
 		ShaderHandle shader = createShader(stages);
-		return registerShader(hash, shader, getUniformBlocks(shader, stages));
+		return registerShader(hash, shader, getUniformBlocks(shader, stages), pool);
 	}
 
-	ImageHandle RenderingContext::loadImage(const char* filePath, ImageInterpolation interpolation, ImageTiling tiling) {
+    ResourcePoolHandle RenderingContext::createResourcePool(const ResourcePoolHandle* pool) {
+        resourcePools[nextResourcePoolId] = {};
+        return registerHandleToPool(ResourcePoolHandle(nextResourcePoolId++), pool);
+    }
+
+    void RenderingContext::deleteResourcePool(const ResourcePoolHandle& handle) {
+        const auto& it = resourcePools.find(handle.identifier());
+        TT::assert(it != resourcePools.end());
+        for(const auto& entry : it->second) {
+            switch(entry.index()) {
+            case 0:
+                deleteBuffer(std::get<BufferHandle>(entry));
+                break;
+            case 1:
+                deleteMesh(std::get<MeshHandle>(entry));
+                break;
+            case 2:
+                deleteImage(std::get<ImageHandle>(entry));
+                break;
+            case 3:
+                deleteFramebuffer(std::get<FramebufferHandle>(entry));
+                break;
+            case 4:
+                deleteShaderStage(std::get<ShaderStageHandle>(entry));
+                break;
+            case 5:
+                deleteShader(std::get<ShaderHandle>(entry));
+                break;
+            case 6:
+                deleteUniformBuffer(std::get<UniformBlockHandle>(entry));
+                break;
+            case 7:
+                deleteMaterial(std::get<MaterialHandle>(entry));
+                break;
+            case 8:
+                deleteResourcePool(std::get<ResourcePoolHandle>(entry));
+                break;
+            default:
+                TT::assert(false);
+            }
+        }
+        resourcePools.erase(it);
+    }
+
+	ImageHandle RenderingContext::loadImage(const char* filePath, ImageInterpolation interpolation, ImageTiling tiling, const ResourcePoolHandle* pool) {
 		int width, height, channels;
 		unsigned char* data = stbi_load(filePath, &width, &height, &channels, 0);
 		ImageFormat format;
@@ -460,12 +502,12 @@ namespace TTRendering {
 		case 4: format = ImageFormat::RGBA8; break;
         default: TT::error("Invalid image: %s", filePath); return ImageHandle::Null;
 		}
-		ImageHandle r = createImage(width, height, format, interpolation, tiling, data);
+		ImageHandle r = createImage(width, height, format, interpolation, tiling, data, pool);
 		stbi_image_free(data);
 		return { r };
 	}
 
-    MeshFileInfo RenderingContext::loadMesh(const char* fbxFilePath) {
+    MeshFileInfo RenderingContext::loadMesh(const char* fbxFilePath, const ResourcePoolHandle* pool) {
         TT::FbxExtractor scene(fbxFilePath);
 
         // Bidirectional LUT to go from mesh handle to material and back
@@ -518,13 +560,13 @@ namespace TTRendering {
                     TT::assert(false);
                     continue;
                 }
-                auto vbo = createBuffer(subMesh.vertexDataSizeInBytes, subMesh.vertexDataBlob);
+                auto vbo = createBuffer(subMesh.vertexDataSizeInBytes, subMesh.vertexDataBlob, BufferMode::StaticDraw,  pool);
                 MeshHandle gpuMesh = MeshHandle::Null;
                 if(subMesh.indexDataSizeInBytes) {
-                    auto ibo = createBuffer(subMesh.indexDataSizeInBytes, subMesh.indexDataBlob);
-                    gpuMesh = createMesh(subMesh.indexDataSizeInBytes / mesh.indexElementSizeInBytes, vbo, layout, &ibo);
+                    auto ibo = createBuffer(subMesh.indexDataSizeInBytes, subMesh.indexDataBlob, BufferMode::StaticDraw, pool);
+                    gpuMesh = createMesh(subMesh.indexDataSizeInBytes / mesh.indexElementSizeInBytes, vbo, layout, &ibo, PrimitiveType::Triangle, 0, nullptr, {}, pool);
                 } else {
-                    gpuMesh = createMesh(subMesh.vertexDataSizeInBytes / vertexStride, vbo, layout);
+                    gpuMesh = createMesh(subMesh.vertexDataSizeInBytes / vertexStride, vbo, layout, nullptr, PrimitiveType::Triangle, 0, nullptr, {}, pool);
                 }
 
                 std::string materialName(mesh.materialNames[subMesh.materialId].buffer, mesh.materialNames[subMesh.materialId].length);
