@@ -421,14 +421,14 @@ namespace TTRendering {
 
     void RenderingContext::deleteMaterial(const MaterialHandle& material) {
         auto it = std::find(materialResources.begin(), materialResources.end(), material._resources);
-        TT::assert(it != materialResources.end());
+        // We must anticipate that an invalidated handle is being supplied.
         if(it != materialResources.end())
             materialResources.erase(it);
     }
 
     void RenderingContext::deleteUniformBuffer(const UniformBlockHandle& uniformBuffer) {
         auto it = std::find(materialResources.begin(), materialResources.end(), uniformBuffer._resources);
-        TT::assert(it != materialResources.end());
+        // We must anticipate that an invalidated handle is being supplied.
         if(it != materialResources.end())
             materialResources.erase(it);
     }
@@ -523,7 +523,6 @@ namespace TTRendering {
         // To save space we push material names into this vector
         std::vector<std::string> materialNames;
 
-        
         // To speed up the internal check of known material names we can use a map
         std::unordered_map<std::string, size_t> materialNameToId;
         // To redirect transform mesh indices to (valid) meshes we need this internal map

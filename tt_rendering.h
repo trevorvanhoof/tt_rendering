@@ -76,10 +76,11 @@ namespace TTRendering {
         void removeValue(const T& handle) {
             // TODO: This is slow and bad.
             const auto& it_ = std::find(handles.begin(), handles.end(), handle);
-            TT::assert(it_ != handles.end());
+            // Like remove, this fails silently in the event the handle was invalid already.
+            if (it_ == handles.end()) return;
             size_t handleIndex = it_ - handles.begin();
             const auto& it = std::find_if(keyToIndex.begin(), keyToIndex.end(), [&handleIndex](auto&& pair) { return pair.second == handleIndex; });
-            TT::assert(it != keyToIndex.end());
+            if (it == keyToIndex.end()) return;
             remove(it->first);
         }
 
@@ -676,15 +677,15 @@ namespace TTRendering {
         virtual void resizeFramebuffer(const FramebufferHandle& framebuffer, unsigned int width, unsigned int height) = 0;
         virtual void dispatchCompute(const MaterialHandle& material, unsigned int x, unsigned int y, unsigned int z) = 0;
 
-        // TODO: All of these should assume the handle is already invalid (not the same as Null)!
 		virtual void deleteBuffer(const BufferHandle& buffer) = 0;
 		virtual void deleteMesh(const MeshHandle& mesh) = 0;
 		virtual void deleteShaderStage(const ShaderStageHandle& mesh) = 0;
 		virtual void deleteShader(const ShaderHandle& mesh) = 0;
 		virtual void deleteImage(const ImageHandle& mesh) = 0;
+        virtual void deleteFramebuffer(const FramebufferHandle& material) = 0;
+
 		void deleteMaterial(const MaterialHandle& material);
 		void deleteUniformBuffer(const UniformBlockHandle& material);
-		virtual void deleteFramebuffer(const FramebufferHandle& material) = 0;
 
         ResourcePoolHandle createResourcePool(const ResourcePoolHandle* pool = nullptr);
         void deleteResourcePool(const ResourcePoolHandle& handle);
