@@ -1,6 +1,3 @@
-// TODO: ResourcePool / ResourcePoolHandle: createResourcePool method that makes a new collection of handles to clean up, 
-// all create mehods should get resource pool arguments, including resourcepool because why not have hierarchical pools.
-// Then we can deleteResourcePool to free all contained resources at once.
 #pragma once
 
 #include "../tt_cpplib/tt_math.h"
@@ -472,6 +469,12 @@ namespace TTRendering {
     struct ResourcePoolHandle : public HandleBase {
     protected:
         using HandleBase::HandleBase;
+
+    public:
+        static const ResourcePoolHandle Null;
+        operator bool() const { return *this != Null; }
+        bool operator==(const ResourcePoolHandle& rhs) const { return identifier() == rhs.identifier(); }
+        bool operator!=(const ResourcePoolHandle& rhs) const { return !operator==(rhs); }
     };
 
 	struct PushConstants {
@@ -598,7 +601,6 @@ namespace TTRendering {
 
         typedef std::variant<BufferHandle, MeshHandle, ImageHandle, FramebufferHandle, ShaderStageHandle, ShaderHandle, UniformBlockHandle, MaterialHandle, ResourcePoolHandle> ResourceHandle;
         static const size_t defaultResourcePool = 1;
-        std::unordered_map<size_t, std::vector<ResourceHandle>> resourcePools; // = { defaultResourcePool, {} };
         size_t nextResourcePoolId = defaultResourcePool + 1;
 
         RenderingContext(const RenderingContext&) = delete;
@@ -607,6 +609,9 @@ namespace TTRendering {
         RenderingContext& operator=(RenderingContext&&) = delete;
 
     protected:
+        RenderingContext() = default;
+
+        std::unordered_map<size_t, std::vector<ResourceHandle>> resourcePools; // pools to clean up in the destructor
         HandlePool<MeshHandle> meshes; // allocated meshes, used during drawPass
 
         template<typename T> const T& registerHandleToPool(const T& handle, const ResourcePoolHandle* pool = nullptr) { resourcePools[pool ? pool->identifier() : defaultResourcePool].push_back(handle); return handle; }
@@ -635,12 +640,9 @@ namespace TTRendering {
 
         const UniformInfo* materialUniformInfo(const ShaderHandle& handle) const;
 
+        void deleteResourcePoolInternal(const ResourcePoolHandle& handle, bool erase = true);
+
 	public:
-        RenderingContext() = default;
-
-        // Clean up all resource pools
-        ~RenderingContext() { for(const auto& pair : resourcePools) deleteResourcePool(ResourcePoolHandle(pair.first)); }
-
 		void windowResized(unsigned int width, unsigned int height) { screenWidth = width; screenHeight = height; }
         void resolution(unsigned int& width, unsigned int& height) const { width = screenWidth; height = screenHeight; }
 
@@ -674,7 +676,7 @@ namespace TTRendering {
         virtual void resizeFramebuffer(const FramebufferHandle& framebuffer, unsigned int width, unsigned int height) = 0;
         virtual void dispatchCompute(const MaterialHandle& material, unsigned int x, unsigned int y, unsigned int z) = 0;
 
-        // TODO: Should we make these all protected so deletion HAS to happen through resource pools?
+        // TODO: All of these should assume the handle is already invalid (not the same as Null)!
 		virtual void deleteBuffer(const BufferHandle& buffer) = 0;
 		virtual void deleteMesh(const MeshHandle& mesh) = 0;
 		virtual void deleteShaderStage(const ShaderStageHandle& mesh) = 0;

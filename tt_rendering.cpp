@@ -451,10 +451,10 @@ namespace TTRendering {
         resourcePools[nextResourcePoolId] = {};
         return registerHandleToPool(ResourcePoolHandle(nextResourcePoolId++), pool);
     }
-
-    void RenderingContext::deleteResourcePool(const ResourcePoolHandle& handle) {
+    
+    void RenderingContext::deleteResourcePoolInternal(const ResourcePoolHandle& handle, bool erase) {
         const auto& it = resourcePools.find(handle.identifier());
-        TT::assert(it != resourcePools.end());
+        TT::assert(it != resourcePools.end()); // if (it == resourcePools.end()) return;
         for(const auto& entry : it->second) {
             switch(entry.index()) {
             case 0:
@@ -488,7 +488,14 @@ namespace TTRendering {
                 TT::assert(false);
             }
         }
-        resourcePools.erase(it);
+        // Make sure to empty the pool, so that if we are trying to delete the same handle twice with erase = false it will still work.
+        it->second.clear();
+        if (erase)
+            resourcePools.erase(it);
+    }
+
+    void RenderingContext::deleteResourcePool(const ResourcePoolHandle& handle) { 
+        deleteResourcePoolInternal(handle, true); 
     }
 
 	ImageHandle RenderingContext::loadImage(const char* filePath, ImageInterpolation interpolation, ImageTiling tiling, const ResourcePoolHandle* pool) {
@@ -631,4 +638,5 @@ namespace TTRendering {
     const ShaderHandle ShaderHandle::Null(0);
     const MaterialHandle MaterialHandle::Null(ShaderHandle::Null, nullptr);
     const UniformBlockHandle UniformBlockHandle::Null(nullptr);
+    const ResourcePoolHandle ResourcePoolHandle::Null(0);
 }

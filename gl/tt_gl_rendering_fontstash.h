@@ -62,9 +62,8 @@ namespace {
         glPixelStorei(GL_UNPACK_SKIP_ROWS, 0); TT_GL_DBG_ERR;
 	}
 
-	void _renderDraw(void* userPtr, const float* verts, const float* tcoords, const unsigned int* colors, int nverts) {
-        // TODO: not supported (yet?)
-	}
+    // TODO: not necessary or supported, should we omit it?
+	void _renderDraw(void* userPtr, const float* verts, const float* tcoords, const unsigned int* colors, int nverts) {}
 
 	void _renderDelete(void* userPtr) {
         FonsGLContext& context = *((FonsGLContext*)userPtr);

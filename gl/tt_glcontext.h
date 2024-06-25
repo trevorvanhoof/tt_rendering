@@ -3,7 +3,6 @@
 #include "../../tt_cpplib/tt_window.h"
 
 namespace TTRendering {
-	// TODO: This context does not clean up after itself
 	class OpenGLContext final : public RenderingContext {
 		HDC__* _windowsGLContext = nullptr;
 		std::unordered_map<int, UniformInfo> getUniformBlocks(const ShaderHandle& shader, const std::vector<ShaderStageHandle>& stages) const override;
@@ -22,9 +21,15 @@ namespace TTRendering {
 
 	public:
         // This is useful when running in another framework, but it means beginFrame and endFrame do not work.
-		OpenGLContext();
-
+        OpenGLContext();
 		OpenGLContext(const TT::Window& window);
+
+        // Clean up all resource pools
+        virtual ~OpenGLContext() { 
+            for(const auto& pair : resourcePools) {
+                deleteResourcePoolInternal(ResourcePoolHandle(pair.first), false); 
+            }
+        }
 
 		void beginFrame() override;
 		void endFrame() override;
