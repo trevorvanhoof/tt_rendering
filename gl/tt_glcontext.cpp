@@ -615,20 +615,6 @@ namespace TTRendering {
         return imageSize(framebuffer._colorAttachments[0], width, height);
     }
 
-#if 0
-    void OpenGLContext::bindFramebuffer(const TTRendering::FramebufferHandle* framebuffer) {
-        if (!framebuffer) {
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
-            glViewport(0, 0, screenWidth, screenHeight); TT_GL_DBG_ERR;
-        } else {
-            glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)framebuffer->identifier());
-            unsigned int width, height;
-            framebufferSize(*framebuffer, width, height);
-            glViewport(0, 0, width, height);
-        }
-    }
-#endif
-
 	void OpenGLContext::drawPass(const RenderPass& pass, unsigned int defaultFramebuffer) {
         if (pass._framebuffer == FramebufferHandle::Null) {
             glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebuffer);
